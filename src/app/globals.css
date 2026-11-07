@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light dark;
+  --background: #faf6ef;
+  --foreground: #2a241d;
+  --surface: #efe8dc;
+  --line: #dcd2c2;
+  --muted: #6e6354;
+  --accent: #b5482a;
+  --accent-strong: #953a20;
+  --on-accent: #fffaf3;
+  --danger: #a82a1e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #191613;
+    --foreground: #f2ebdf;
+    --surface: #2a251f;
+    --line: #40382f;
+    --muted: #ada293;
+    --accent: #e0714d;
+    --accent-strong: #c75c3a;
+    --on-accent: #1d120c;
+    --danger: #f08a7c;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-heading);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Shows a shot was taken, since the camera stays open afterwards. */
+.shutter-flash {
+  animation: shutter-flash 150ms ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes shutter-flash {
+  from { opacity: 0.7; }
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shutter-flash {
+    animation-duration: 1ms;
+  }
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+  touch-action: manipulation;
+}
