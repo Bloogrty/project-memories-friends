@@ -103,6 +103,13 @@ const en = {
   photoUnreadable: "That photo couldn't be read.",
   uploadRefused: "That upload was refused.",
 
+  // Live Wall
+  wallEmpty: "Photos will appear here as guests take them.",
+  wallStart: "Start",
+  wallStartHint: "Starts the slideshow with sound, in full screen.",
+  wallFullscreen: "Full screen",
+  wallReconnecting: "Reconnecting…",
+
   // Server replies
   serverError: "Something went wrong on the server. Please try again.",
   dayNotFound: "This Day doesn't exist.",
@@ -204,6 +211,12 @@ const id: Texts = {
 
   photoUnreadable: "Foto itu tidak bisa dibaca.",
   uploadRefused: "Upload itu ditolak.",
+
+  wallEmpty: "Foto akan muncul di sini begitu tamu mulai memotret.",
+  wallStart: "Mulai",
+  wallStartHint: "Memulai slideshow dengan suara, dalam layar penuh.",
+  wallFullscreen: "Layar penuh",
+  wallReconnecting: "Menyambung ulang…",
 
   serverError: "Ada masalah di server. Silakan coba lagi.",
   dayNotFound: "Album ini tidak ada.",

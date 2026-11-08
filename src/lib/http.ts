@@ -66,6 +66,14 @@ function digest(value: string) {
   return createHash("sha256").update(value).digest();
 }
 
+/** The Live Wall exists only when FEATURE_LIVE_WALL is on, and then only with the right key, if one is set. */
+export function wallAllowed(key: string | null) {
+  const config = getServerConfig();
+  if (!config.FEATURE_LIVE_WALL) return false;
+  if (!config.LIVE_WALL_KEY) return true;
+  return timingSafeEqual(digest(key ?? ""), digest(config.LIVE_WALL_KEY));
+}
+
 export function requireAdmin(request: Request) {
   const header = request.headers.get("authorization") ?? "";
   const supplied = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";

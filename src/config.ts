@@ -111,6 +111,14 @@ const clientSchema = z.object({
   IN_APP_PHOTO_CAMERA: bool.default(true),
   UPLOAD_CONCURRENCY: z.coerce.number().int().min(1).default(2),
   UPLOAD_RETRIES: z.coerce.number().int().min(0).default(3),
+  LIVE_WALL_INTERVAL: z.coerce.number().min(2).default(6),
+  LIVE_WALL_POLL_SECONDS: z.coerce.number().min(2).default(10),
+  LIVE_WALL_MAX_ITEMS: z.coerce.number().int().min(1).default(100),
+  LIVE_WALL_MUSIC_URLS: csv
+    .refine((urls) => urls.every((url) => url.startsWith("/") || /^https?:\/\/\S+$/.test(url)), "each must start with / (a file in public/) or https://")
+    .default([]),
+  LIVE_WALL_MUSIC_VOLUME: z.coerce.number().min(0).max(1).default(0.6),
+  LIVE_WALL_VIDEO_SOUND: bool.default(false),
 });
 
 function toClientConfig(env: z.output<typeof clientSchema>) {
@@ -140,6 +148,14 @@ function toClientConfig(env: z.output<typeof clientSchema>) {
     inAppPhotoCamera: env.IN_APP_PHOTO_CAMERA,
     uploadConcurrency: env.UPLOAD_CONCURRENCY,
     uploadRetries: env.UPLOAD_RETRIES,
+    wall: {
+      intervalMs: env.LIVE_WALL_INTERVAL * 1000,
+      pollMs: env.LIVE_WALL_POLL_SECONDS * 1000,
+      maxItems: env.LIVE_WALL_MAX_ITEMS,
+      musicUrls: env.LIVE_WALL_MUSIC_URLS,
+      musicVolume: env.LIVE_WALL_MUSIC_VOLUME,
+      videoSound: env.LIVE_WALL_VIDEO_SOUND,
+    },
   };
 }
 
@@ -200,6 +216,9 @@ const serverSchema = z
     DAY_CLOSE_TIME: clockTime.default("23:59"),
     // Default depends on the mode, see below.
     GALLERY_AFTER_CLOSE: z.enum(["hidden", "readonly"]).optional(),
+    FEATURE_LIVE_WALL: bool.default(false),
+    // Optional: when set, the wall only opens as /wall?key=<this value>.
+    LIVE_WALL_KEY: z.string().optional(),
     LOG_ENABLED: bool.default(true),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
