@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { publicConfig } from "@/config";
+import { useClientConfig } from "@/lib/client-config";
 import { cameraSupported, useCamera } from "@/lib/use-camera";
 
 type Stage = "idle" | "recording" | "review";
@@ -21,7 +21,7 @@ function unsupportedMessage() {
   return null;
 }
 
-function capturePoster(video: HTMLVideoElement) {
+function capturePoster(video: HTMLVideoElement, jpegQuality: number) {
   const scale = Math.min(1, POSTER_MAX_EDGE_PX / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(video.videoWidth * scale);
@@ -31,7 +31,7 @@ function capturePoster(video: HTMLVideoElement) {
     canvas.toBlob(
       (blob) => (blob ? resolve(blob) : reject(new Error("Could not capture a preview."))),
       "image/jpeg",
-      publicConfig.clientJpegQuality,
+      jpegQuality,
     );
   });
 }
@@ -47,9 +47,10 @@ export function VideoRecorder({
   onCancel: () => void;
   onRecorded: (video: Blob, poster: Blob) => void;
 }) {
+  const config = useClientConfig();
   const { preview, stream, ready, failed, flip } = useCamera({
     audio: true,
-    maxEdgePx: publicConfig.videoMaxEdgePx,
+    maxEdgePx: config.videoMaxEdgePx,
     aspect: VIDEO_ASPECT,
   });
   const [stage, setStage] = useState<Stage>("idle");
@@ -92,19 +93,19 @@ export function VideoRecorder({
       return;
     }
     try {
-      poster.current = await capturePoster(preview.current);
+      poster.current = await capturePoster(preview.current, config.image.jpegQuality);
       const chunks: Blob[] = [];
       let size = 0;
       const next = new MediaRecorder(stream.current, {
         mimeType,
-        videoBitsPerSecond: publicConfig.videoBitsPerSecond,
+        videoBitsPerSecond: config.videoBitsPerSecond,
         audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
       });
       next.ondataavailable = (event) => {
         chunks.push(event.data);
         size += event.data.size;
         // Bitrates are only approximate, so also stop before the file outgrows the upload limit.
-        if (size >= publicConfig.videoTargetBytes) stopRecording();
+        if (size >= config.videoTargetBytes) stopRecording();
       };
       next.onstop = () => {
         if (discarded.current) return;
@@ -114,7 +115,7 @@ export function VideoRecorder({
           setError("Nothing was recorded. Please try again.");
           return;
         }
-        if (!publicConfig.reviewVideoBeforeUpload) {
+        if (!config.reviewVideoBeforeUpload) {
           onRecorded(blob, poster.current);
           return;
         }
@@ -130,8 +131,8 @@ export function VideoRecorder({
       setStage("recording");
       timer.current = setInterval(() => {
         const seconds = (Date.now() - startedAt) / 1000;
-        setElapsed(Math.min(seconds, publicConfig.videoMaxSeconds));
-        if (seconds >= publicConfig.videoMaxSeconds) stopRecording();
+        setElapsed(Math.min(seconds, config.videoMaxSeconds));
+        if (seconds >= config.videoMaxSeconds) stopRecording();
       }, TIMER_INTERVAL_MS);
     } catch {
       setError("Recording couldn't start. Please try again.");
@@ -152,7 +153,7 @@ export function VideoRecorder({
         <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
           <p className="text-sm tabular-nums">
             {stage === "recording" && <span aria-hidden className="mr-2 inline-block size-2.5 rounded-full bg-red-500" />}
-            {formatSeconds(elapsed)} / {formatSeconds(publicConfig.videoMaxSeconds)}
+            {formatSeconds(elapsed)} / {formatSeconds(config.videoMaxSeconds)}
           </p>
           <button type="button" onClick={onCancel} className="h-11 shrink-0 rounded-lg px-3 font-medium active:bg-white/20">
             Cancel

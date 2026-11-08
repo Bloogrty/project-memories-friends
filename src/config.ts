@@ -1,11 +1,35 @@
 import { z } from "zod";
 
 /**
- * The only module that reads process.env.
- * - publicConfig is validated on import and is safe in the browser.
- * - getServerConfig() holds secrets. It is validated at server startup
- *   (src/instrumentation.ts), so a bad value stops the app with a clear error.
+ * The only module that reads process.env. Server-side only: browser code gets
+ * its settings through src/lib/client-config.tsx instead of importing this.
+ *
+ * - getClientConfig(): settings pages need in the browser. No secrets. The root
+ *   layout reads them on the server and hands them to every page, so none of
+ *   them need a NEXT_PUBLIC_ prefix.
+ * - getServerConfig(): everything else, secrets included.
+ *
+ * Both are validated when the server starts (src/instrumentation.ts), so a bad
+ * value stops the app with a clear error instead of misbehaving later.
  */
+
+/**
+ * Renamed variables: new name → old name. The old name keeps working, so an
+ * existing deployment behaves the same without touching its env. When both are
+ * set, the new name wins.
+ */
+const RENAMED: Record<string, string> = {
+  ALLOW_GALLERY_UPLOAD: "NEXT_PUBLIC_ALLOW_GALLERY_UPLOAD",
+  GALLERY_POLL_SECONDS: "NEXT_PUBLIC_GALLERY_POLL_SECONDS",
+  VIDEO_MAX_SECONDS: "NEXT_PUBLIC_VIDEO_MAX_SECONDS",
+  VIDEO_BITRATE_KBPS: "NEXT_PUBLIC_VIDEO_BITRATE_KBPS",
+  VIDEO_MAX_EDGE_PX: "NEXT_PUBLIC_VIDEO_MAX_EDGE_PX",
+  VIDEO_TARGET_MB: "NEXT_PUBLIC_VIDEO_TARGET_MB",
+  REVIEW_VIDEO_BEFORE_UPLOAD: "NEXT_PUBLIC_REVIEW_VIDEO_BEFORE_UPLOAD",
+  IN_APP_PHOTO_CAMERA: "NEXT_PUBLIC_IN_APP_PHOTO_CAMERA",
+  UPLOAD_CONCURRENCY: "NEXT_PUBLIC_UPLOAD_CONCURRENCY",
+  UPLOAD_RETRIES: "NEXT_PUBLIC_UPLOAD_RETRIES",
+};
 
 const bool = z.enum(["true", "false"]).transform((value) => value === "true");
 const clockTime = z
@@ -23,13 +47,20 @@ const timezone = z.string().refine((value) => {
   }
 }, "must be a valid IANA timezone, e.g. Asia/Jakarta");
 
-/** Treats `NAME=` (blank in .env or Vercel) the same as "not set". */
-function withoutBlanks(env: Record<string, string | undefined>) {
-  return Object.fromEntries(Object.entries(env).filter(([, value]) => value !== ""));
+/** process.env with blanks removed (`NAME=` means "not set") and old names copied to new ones. */
+function readEnv() {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && value !== "") env[key] = value;
+  }
+  for (const [current, old] of Object.entries(RENAMED)) {
+    if (env[current] === undefined && env[old] !== undefined) env[current] = env[old];
+  }
+  return env;
 }
 
-function parseEnv<T extends z.ZodType>(schema: T, env: Record<string, string | undefined>): z.output<T> {
-  const result = schema.safeParse(withoutBlanks(env));
+function parseEnv<T extends z.ZodType>(schema: T): z.output<T> {
+  const result = schema.safeParse(readEnv());
   if (result.success) return result.data;
   const problems = result.error.issues
     .map((issue) => `  - ${issue.path.join(".")}: ${issue.message}`)
@@ -37,57 +68,63 @@ function parseEnv<T extends z.ZodType>(schema: T, env: Record<string, string | u
   throw new Error(`Invalid environment configuration:\n${problems}`);
 }
 
-const publicSchema = z.object({
+/** Old variable names that are set without their new name, for a startup warning. */
+export function renamedVariablesInUse() {
+  return Object.entries(RENAMED)
+    .filter(([current, old]) => process.env[old] && !process.env[current])
+    .map(([current, old]) => `${old} (now ${current})`);
+}
+
+// ---------- Settings the browser needs (no secrets) ----------
+
+const clientSchema = z.object({
   NEXT_PUBLIC_APP_NAME: z.string().default("Memories"),
-  NEXT_PUBLIC_ALLOW_GALLERY_UPLOAD: bool.default(false),
+  ALLOW_GALLERY_UPLOAD: bool.default(false),
   NEXT_PUBLIC_CLIENT_MAX_EDGE_PX: z.coerce.number().int().min(320).default(2048),
   NEXT_PUBLIC_CLIENT_JPEG_QUALITY: z.coerce.number().gt(0).max(1).default(0.8),
   NEXT_PUBLIC_CLIENT_TARGET_MB: z.coerce.number().positive().default(1.5),
-  NEXT_PUBLIC_GALLERY_POLL_SECONDS: z.coerce.number().min(1).default(10),
-  NEXT_PUBLIC_VIDEO_MAX_SECONDS: z.coerce.number().int().positive().default(15),
-  NEXT_PUBLIC_VIDEO_BITRATE_KBPS: z.coerce.number().int().positive().default(1800),
-  NEXT_PUBLIC_VIDEO_MAX_EDGE_PX: z.coerce.number().int().min(320).default(1280),
-  NEXT_PUBLIC_VIDEO_TARGET_MB: z.coerce.number().positive().default(3.6),
-  NEXT_PUBLIC_REVIEW_VIDEO_BEFORE_UPLOAD: bool.default(false),
-  NEXT_PUBLIC_IN_APP_PHOTO_CAMERA: bool.default(true),
-  NEXT_PUBLIC_UPLOAD_CONCURRENCY: z.coerce.number().int().min(1).default(2),
-  NEXT_PUBLIC_UPLOAD_RETRIES: z.coerce.number().int().min(0).default(3),
+  GALLERY_POLL_SECONDS: z.coerce.number().min(1).default(10),
+  VIDEO_MAX_SECONDS: z.coerce.number().int().positive().default(15),
+  VIDEO_BITRATE_KBPS: z.coerce.number().int().positive().default(1800),
+  VIDEO_MAX_EDGE_PX: z.coerce.number().int().min(320).default(1280),
+  VIDEO_TARGET_MB: z.coerce.number().positive().default(3.6),
+  REVIEW_VIDEO_BEFORE_UPLOAD: bool.default(false),
+  IN_APP_PHOTO_CAMERA: bool.default(true),
+  UPLOAD_CONCURRENCY: z.coerce.number().int().min(1).default(2),
+  UPLOAD_RETRIES: z.coerce.number().int().min(0).default(3),
 });
 
-// NEXT_PUBLIC_ values are inlined at build time, so each must be named in full.
-const publicEnv = parseEnv(publicSchema, {
-  NEXT_PUBLIC_APP_NAME: process.env.NEXT_PUBLIC_APP_NAME,
-  NEXT_PUBLIC_ALLOW_GALLERY_UPLOAD: process.env.NEXT_PUBLIC_ALLOW_GALLERY_UPLOAD,
-  NEXT_PUBLIC_CLIENT_MAX_EDGE_PX: process.env.NEXT_PUBLIC_CLIENT_MAX_EDGE_PX,
-  NEXT_PUBLIC_CLIENT_JPEG_QUALITY: process.env.NEXT_PUBLIC_CLIENT_JPEG_QUALITY,
-  NEXT_PUBLIC_CLIENT_TARGET_MB: process.env.NEXT_PUBLIC_CLIENT_TARGET_MB,
-  NEXT_PUBLIC_GALLERY_POLL_SECONDS: process.env.NEXT_PUBLIC_GALLERY_POLL_SECONDS,
-  NEXT_PUBLIC_VIDEO_MAX_SECONDS: process.env.NEXT_PUBLIC_VIDEO_MAX_SECONDS,
-  NEXT_PUBLIC_VIDEO_BITRATE_KBPS: process.env.NEXT_PUBLIC_VIDEO_BITRATE_KBPS,
-  NEXT_PUBLIC_VIDEO_MAX_EDGE_PX: process.env.NEXT_PUBLIC_VIDEO_MAX_EDGE_PX,
-  NEXT_PUBLIC_VIDEO_TARGET_MB: process.env.NEXT_PUBLIC_VIDEO_TARGET_MB,
-  NEXT_PUBLIC_REVIEW_VIDEO_BEFORE_UPLOAD: process.env.NEXT_PUBLIC_REVIEW_VIDEO_BEFORE_UPLOAD,
-  NEXT_PUBLIC_IN_APP_PHOTO_CAMERA: process.env.NEXT_PUBLIC_IN_APP_PHOTO_CAMERA,
-  NEXT_PUBLIC_UPLOAD_CONCURRENCY: process.env.NEXT_PUBLIC_UPLOAD_CONCURRENCY,
-  NEXT_PUBLIC_UPLOAD_RETRIES: process.env.NEXT_PUBLIC_UPLOAD_RETRIES,
-});
+function toClientConfig(env: z.output<typeof clientSchema>) {
+  return {
+    appName: env.NEXT_PUBLIC_APP_NAME,
+    allowGalleryUpload: env.ALLOW_GALLERY_UPLOAD,
+    image: {
+      maxEdgePx: env.NEXT_PUBLIC_CLIENT_MAX_EDGE_PX,
+      jpegQuality: env.NEXT_PUBLIC_CLIENT_JPEG_QUALITY,
+      targetBytes: env.NEXT_PUBLIC_CLIENT_TARGET_MB * 1024 * 1024,
+    },
+    galleryPollMs: env.GALLERY_POLL_SECONDS * 1000,
+    videoMaxSeconds: env.VIDEO_MAX_SECONDS,
+    videoBitsPerSecond: env.VIDEO_BITRATE_KBPS * 1000,
+    videoMaxEdgePx: env.VIDEO_MAX_EDGE_PX,
+    videoTargetBytes: env.VIDEO_TARGET_MB * 1024 * 1024,
+    reviewVideoBeforeUpload: env.REVIEW_VIDEO_BEFORE_UPLOAD,
+    inAppPhotoCamera: env.IN_APP_PHOTO_CAMERA,
+    uploadConcurrency: env.UPLOAD_CONCURRENCY,
+    uploadRetries: env.UPLOAD_RETRIES,
+  };
+}
 
-export const publicConfig = {
-  appName: publicEnv.NEXT_PUBLIC_APP_NAME,
-  allowGalleryUpload: publicEnv.NEXT_PUBLIC_ALLOW_GALLERY_UPLOAD,
-  clientMaxEdgePx: publicEnv.NEXT_PUBLIC_CLIENT_MAX_EDGE_PX,
-  clientJpegQuality: publicEnv.NEXT_PUBLIC_CLIENT_JPEG_QUALITY,
-  clientTargetBytes: publicEnv.NEXT_PUBLIC_CLIENT_TARGET_MB * 1024 * 1024,
-  galleryPollMs: publicEnv.NEXT_PUBLIC_GALLERY_POLL_SECONDS * 1000,
-  videoMaxSeconds: publicEnv.NEXT_PUBLIC_VIDEO_MAX_SECONDS,
-  videoBitsPerSecond: publicEnv.NEXT_PUBLIC_VIDEO_BITRATE_KBPS * 1000,
-  videoMaxEdgePx: publicEnv.NEXT_PUBLIC_VIDEO_MAX_EDGE_PX,
-  videoTargetBytes: publicEnv.NEXT_PUBLIC_VIDEO_TARGET_MB * 1024 * 1024,
-  reviewVideoBeforeUpload: publicEnv.NEXT_PUBLIC_REVIEW_VIDEO_BEFORE_UPLOAD,
-  inAppPhotoCamera: publicEnv.NEXT_PUBLIC_IN_APP_PHOTO_CAMERA,
-  uploadConcurrency: publicEnv.NEXT_PUBLIC_UPLOAD_CONCURRENCY,
-  uploadRetries: publicEnv.NEXT_PUBLIC_UPLOAD_RETRIES,
-};
+export type ClientConfig = ReturnType<typeof toClientConfig>;
+
+let clientConfig: ClientConfig | undefined;
+
+export function getClientConfig(): ClientConfig {
+  clientConfig ??= toClientConfig(parseEnv(clientSchema));
+  return clientConfig;
+}
+
+// ---------- Server-only settings (secrets live here) ----------
 
 const serverSchema = z
   .object({
@@ -137,6 +174,6 @@ const serverSchema = z
 let serverConfig: z.output<typeof serverSchema> | undefined;
 
 export function getServerConfig() {
-  serverConfig ??= parseEnv(serverSchema, process.env);
+  serverConfig ??= parseEnv(serverSchema);
   return serverConfig;
 }

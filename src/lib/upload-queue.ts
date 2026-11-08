@@ -1,5 +1,7 @@
-import { publicConfig } from "@/config";
+import type { ClientConfig } from "@/config";
 import { compressImage } from "./compress";
+
+type QueueOptions = Pick<ClientConfig, "image" | "uploadConcurrency" | "uploadRetries">;
 
 /**
  * Uploads run here in the background, so guests can keep shooting however slow
@@ -40,7 +42,10 @@ export class UploadQueue {
   private nextKey = 1;
   private listeners = new Set<() => void>();
 
-  constructor(private readonly code: string) {}
+  constructor(
+    private readonly code: string,
+    private readonly options: QueueOptions,
+  ) {}
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -108,7 +113,7 @@ export class UploadQueue {
   }
 
   private pump() {
-    while (this.active < publicConfig.uploadConcurrency) {
+    while (this.active < this.options.uploadConcurrency) {
       // Oldest first, so photos arrive in the order they were taken.
       const next = this.entries.findLast((entry) => entry.status === "waiting");
       if (!next) break;
@@ -127,7 +132,7 @@ export class UploadQueue {
   private async send(entry: Entry) {
     if (!entry.blob && entry.file) {
       try {
-        entry.blob = await compressImage(entry.file);
+        entry.blob = await compressImage(entry.file, this.options.image);
         entry.file = undefined;
         entry.previewUrl = URL.createObjectURL(entry.blob);
         this.publish();
@@ -180,7 +185,7 @@ export class UploadQueue {
   /** Connection problems and server errors are usually temporary. */
   private retryLater(entry: Entry) {
     entry.attempts++;
-    if (entry.attempts > publicConfig.uploadRetries) {
+    if (entry.attempts > this.options.uploadRetries) {
       entry.status = "failed";
       this.publish();
       return;

@@ -66,7 +66,7 @@ To delete a test photo, use `/admin` rather than File Station, so the full photo
 5. Test on your phone over mobile data: open the `*.vercel.app` URL, take a photo, then check that it appears in File Station.
 6. Tap **Video**, allow the camera and microphone, and record a clip. Check that it uploads and plays in the gallery. Try this on both an iPhone and an Android phone if you can, because they record in different ways.
 
-Redeploy after changing any variable. `NEXT_PUBLIC_` values in particular are built into the app.
+Redeploy after changing any variable: Vercel only applies env changes to new deployments.
 
 ## Admin
 

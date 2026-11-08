@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { publicConfig } from "@/config";
+import { useClientConfig } from "@/lib/client-config";
 import { useGuest, useRememberedName } from "@/lib/guest-store";
 import type { DayInfo, GalleryResponse, Photo, Quota } from "@/lib/types";
 import { UploadQueue, type QueuedUpload } from "@/lib/upload-queue";
@@ -48,6 +48,7 @@ function galleryCount(items: Photo[]) {
 }
 
 export function DayClient({ code }: { code: string }) {
+  const config = useClientConfig();
   const { ready, guest, save } = useGuest(code);
   const [gallery, setGallery] = useState<GalleryResponse | null>(null);
   const [missing, setMissing] = useState(false);
@@ -59,7 +60,7 @@ export function DayClient({ code }: { code: string }) {
   const [shooting, setShooting] = useState(false);
   const cameraInput = useRef<HTMLInputElement>(null);
 
-  const [queue] = useState(() => new UploadQueue(code));
+  const [queue] = useState(() => new UploadQueue(code, config));
   const uploads = useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getServerSnapshot);
 
   const refreshGallery = useCallback(async () => {
@@ -81,6 +82,7 @@ export function DayClient({ code }: { code: string }) {
   }, [code, queue]);
 
   // Poll only while the page is on screen, to avoid needless load on the NAS.
+  const pollMs = config.galleryPollMs;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
@@ -88,7 +90,7 @@ export function DayClient({ code }: { code: string }) {
     async function tick() {
       clearTimeout(timer);
       if (document.visibilityState === "visible") await refreshGallery();
-      if (!stopped) timer = setTimeout(tick, publicConfig.galleryPollMs);
+      if (!stopped) timer = setTimeout(tick, pollMs);
     }
     function onVisibilityChange() {
       if (document.visibilityState === "visible") void tick();
@@ -101,7 +103,7 @@ export function DayClient({ code }: { code: string }) {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refreshGallery]);
+  }, [refreshGallery, pollMs]);
 
   const guestId = guest?.id;
   const applyQuota = useCallback(
@@ -169,7 +171,7 @@ export function DayClient({ code }: { code: string }) {
 
   function takePhoto() {
     // The in-app camera needs https. Everywhere else, the phone's own camera still works.
-    if (publicConfig.inAppPhotoCamera && !publicConfig.allowGalleryUpload && cameraSupported()) setShooting(true);
+    if (config.inAppPhotoCamera && !config.allowGalleryUpload && cameraSupported()) setShooting(true);
     else cameraInput.current?.click();
   }
 
@@ -181,7 +183,7 @@ export function DayClient({ code }: { code: string }) {
     );
   }
   if (!gallery) {
-    return <Centered title={offline ? "Can't reach the album" : "Opening the album…"}>{offline ? "We'll keep trying." : null}</Centered>;
+    return <Centered title={offline ? "Can't reach the album" : "Opening the albumâ€¦"}>{offline ? "We'll keep trying." : null}</Centered>;
   }
 
   const { day, photos } = gallery;
@@ -196,11 +198,11 @@ export function DayClient({ code }: { code: string }) {
   return (
     <main className={`mx-auto flex w-full max-w-3xl flex-1 flex-col ${hasFooter ? "pb-44" : "pb-8"}`}>
       <header className="px-4 pt-6 pb-4">
-        <p className="text-sm text-muted">{publicConfig.appName}</p>
+        <p className="text-sm text-muted">{config.appName}</p>
         <h1 className="mt-1 font-display text-3xl leading-tight text-balance">{formatDate(day.opens_at, day.timezone)}</h1>
         <p className="mt-1 text-sm text-muted">
           <DayStatusLine day={day} />
-          {photos.length > 0 && ` · ${galleryCount(photos)}`}
+          {photos.length > 0 && ` Â· ${galleryCount(photos)}`}
         </p>
         {offline && (
           <p role="status" className="mt-2 text-sm text-danger">
@@ -245,7 +247,7 @@ export function DayClient({ code }: { code: string }) {
                 )}
                 {photo.kind === "video" && (
                   <span aria-hidden className="absolute right-1.5 bottom-1.5 grid size-7 place-items-center rounded-full bg-black/70 pl-0.5 text-xs text-white">
-                    ▶
+                    â–¶
                   </span>
                 )}
               </button>
@@ -263,7 +265,7 @@ export function DayClient({ code }: { code: string }) {
                   ref={cameraInput}
                   type="file"
                   accept="image/*"
-                  capture={publicConfig.allowGalleryUpload ? undefined : "environment"}
+                  capture={config.allowGalleryUpload ? undefined : "environment"}
                   className="sr-only"
                   tabIndex={-1}
                   aria-hidden
@@ -275,9 +277,9 @@ export function DayClient({ code }: { code: string }) {
                   }}
                 />
                 <div aria-live="polite" className="mb-2 flex items-baseline justify-between gap-3 text-sm">
-                  <span className="truncate text-muted">{sendingCount > 0 ? `Uploading ${sendingCount}…` : (guest.name ?? "Guest")}</span>
+                  <span className="truncate text-muted">{sendingCount > 0 ? `Uploading ${sendingCount}â€¦` : (guest.name ?? "Guest")}</span>
                   <span className="shrink-0 tabular-nums">
-                    {quota ? `${photoCounter}${videoEnabled ? ` · ${shownVideos} / ${quota.video_limit} videos` : ""} today` : " "}
+                    {quota ? `${photoCounter}${videoEnabled ? ` Â· ${shownVideos} / ${quota.video_limit} videos` : ""} today` : " "}
                   </span>
                 </div>
                 {failedCount > 0 && (
@@ -300,7 +302,7 @@ export function DayClient({ code }: { code: string }) {
                     onClick={takePhoto}
                     className="h-14 min-w-0 flex-2 rounded-xl bg-accent text-lg font-semibold text-on-accent transition-colors active:bg-accent-strong disabled:bg-surface disabled:text-muted"
                   >
-                    {atLimit ? "No photos left" : publicConfig.allowGalleryUpload ? "Add photo" : "Take photo"}
+                    {atLimit ? "No photos left" : config.allowGalleryUpload ? "Add photo" : "Take photo"}
                   </button>
                   {videoEnabled && (
                     <button
@@ -436,7 +438,7 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: st
           disabled={submitting}
           className="h-14 shrink-0 rounded-xl bg-accent px-6 text-lg font-semibold text-on-accent active:bg-accent-strong disabled:bg-surface disabled:text-muted"
         >
-          {submitting ? "Joining…" : "Join"}
+          {submitting ? "Joiningâ€¦" : "Join"}
         </button>
       </div>
       {error && (
@@ -465,7 +467,7 @@ function Lightbox({ photo, timeZone, onClose }: { photo: Photo; timeZone: string
       <div className="flex size-full flex-col">
         <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
           <p className="min-w-0 truncate text-sm">
-            {photo.taken_by ?? "Guest"} · {formatTime(photo.taken_at, timeZone)}
+            {photo.taken_by ?? "Guest"} Â· {formatTime(photo.taken_at, timeZone)}
           </p>
           <button type="button" onClick={onClose} className="h-11 shrink-0 rounded-lg px-3 font-medium active:bg-white/20">
             Close

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { publicConfig } from "@/config";
+import { useClientConfig } from "@/lib/client-config";
 import { captureFrame } from "@/lib/compress";
 import { useCamera } from "@/lib/use-camera";
 
@@ -24,9 +24,10 @@ export function PhotoCamera({
   onClose: () => void;
   onUsePhoneCamera: () => void;
 }) {
+  const config = useClientConfig();
   const { preview, ready, failed, flip } = useCamera({
     audio: false,
-    maxEdgePx: publicConfig.clientMaxEdgePx,
+    maxEdgePx: config.image.maxEdgePx,
     aspect: PHOTO_ASPECT,
   });
   const dialog = useRef<HTMLDialogElement>(null);
@@ -42,7 +43,7 @@ export function PhotoCamera({
     setFlash((count) => count + 1);
     navigator.vibrate?.(SHUTTER_VIBRATE_MS);
     setError(null);
-    captureFrame(preview.current).then(onCapture, () => setError("That photo didn't work. Please try again."));
+    captureFrame(preview.current, config.image).then(onCapture, () => setError("That photo didn't work. Please try again."));
   }
 
   return (

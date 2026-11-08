@@ -1,4 +1,6 @@
-import { publicConfig } from "@/config";
+import type { ClientConfig } from "@/config";
+
+type ImageOptions = ClientConfig["image"];
 
 // Quality steps used only when a photo is still over the target size.
 const QUALITY_STEP = 0.1;
@@ -32,9 +34,9 @@ function toJpeg(canvas: HTMLCanvasElement, quality: number) {
 }
 
 /** Shrinks a camera photo to fit under Vercel's upload limit. */
-export async function compressImage(file: File): Promise<Blob> {
+export async function compressImage(file: File, options: ImageOptions): Promise<Blob> {
   const image = await decode(file);
-  const scale = Math.min(1, publicConfig.clientMaxEdgePx / Math.max(image.width, image.height));
+  const scale = Math.min(1, options.maxEdgePx / Math.max(image.width, image.height));
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(image.width * scale);
@@ -45,25 +47,25 @@ export async function compressImage(file: File): Promise<Blob> {
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
   if ("close" in image) image.close();
-  return canvasToJpeg(canvas);
+  return canvasToJpeg(canvas, options);
 }
 
 /** Saves one frame of a live camera preview, at the same size limits as any other photo. */
-export function captureFrame(video: HTMLVideoElement): Promise<Blob> {
-  const scale = Math.min(1, publicConfig.clientMaxEdgePx / Math.max(video.videoWidth, video.videoHeight));
+export function captureFrame(video: HTMLVideoElement, options: ImageOptions): Promise<Blob> {
+  const scale = Math.min(1, options.maxEdgePx / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(video.videoWidth * scale);
   canvas.height = Math.round(video.videoHeight * scale);
   const context = canvas.getContext("2d");
   if (!context) return Promise.reject(new Error("Could not prepare the photo."));
   context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvasToJpeg(canvas);
+  return canvasToJpeg(canvas, options);
 }
 
-async function canvasToJpeg(canvas: HTMLCanvasElement) {
-  let quality = publicConfig.clientJpegQuality;
+async function canvasToJpeg(canvas: HTMLCanvasElement, options: ImageOptions) {
+  let quality = options.jpegQuality;
   let blob = await toJpeg(canvas, quality);
-  while (blob.size > publicConfig.clientTargetBytes && quality - QUALITY_STEP >= MIN_QUALITY) {
+  while (blob.size > options.targetBytes && quality - QUALITY_STEP >= MIN_QUALITY) {
     quality -= QUALITY_STEP;
     blob = await toJpeg(canvas, quality);
   }

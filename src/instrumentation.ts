@@ -1,9 +1,10 @@
-import { getServerConfig } from "@/config";
+import { getClientConfig, getServerConfig, renamedVariablesInUse } from "@/config";
 import { log } from "@/lib/logger";
 
 /** Runs once when the server starts, so invalid env fails fast with a clear error. */
 export function register() {
   const config = getServerConfig();
+  getClientConfig();
   log.info("server started", {
     storage: config.STORAGE_DRIVER,
     day_mode: config.DAY_MODE,
@@ -13,4 +14,8 @@ export function register() {
     gallery_after_close: config.GALLERY_AFTER_CLOSE,
     log_level: config.LOG_LEVEL,
   });
+  const renamed = renamedVariablesInUse();
+  if (renamed.length > 0) {
+    log.warn("old env variable names still work, but consider renaming them", { variables: renamed.join(", ") });
+  }
 }
