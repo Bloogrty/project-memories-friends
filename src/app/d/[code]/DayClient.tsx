@@ -183,7 +183,7 @@ export function DayClient({ code }: { code: string }) {
     );
   }
   if (!gallery) {
-    return <Centered title={offline ? "Can't reach the album" : "Opening the albumâ€¦"}>{offline ? "We'll keep trying." : null}</Centered>;
+    return <Centered title={offline ? "Can't reach the album" : "Opening the album…"}>{offline ? "We'll keep trying." : null}</Centered>;
   }
 
   const { day, photos } = gallery;
@@ -202,7 +202,7 @@ export function DayClient({ code }: { code: string }) {
         <h1 className="mt-1 font-display text-3xl leading-tight text-balance">{formatDate(day.opens_at, day.timezone)}</h1>
         <p className="mt-1 text-sm text-muted">
           <DayStatusLine day={day} />
-          {photos.length > 0 && ` Â· ${galleryCount(photos)}`}
+          {photos.length > 0 && ` · ${galleryCount(photos)}`}
         </p>
         {offline && (
           <p role="status" className="mt-2 text-sm text-danger">
@@ -247,7 +247,7 @@ export function DayClient({ code }: { code: string }) {
                 )}
                 {photo.kind === "video" && (
                   <span aria-hidden className="absolute right-1.5 bottom-1.5 grid size-7 place-items-center rounded-full bg-black/70 pl-0.5 text-xs text-white">
-                    â–¶
+                    ▶
                   </span>
                 )}
               </button>
@@ -277,9 +277,9 @@ export function DayClient({ code }: { code: string }) {
                   }}
                 />
                 <div aria-live="polite" className="mb-2 flex items-baseline justify-between gap-3 text-sm">
-                  <span className="truncate text-muted">{sendingCount > 0 ? `Uploading ${sendingCount}â€¦` : (guest.name ?? "Guest")}</span>
+                  <span className="truncate text-muted">{sendingCount > 0 ? `Uploading ${sendingCount}…` : (guest.name ?? "Guest")}</span>
                   <span className="shrink-0 tabular-nums">
-                    {quota ? `${photoCounter}${videoEnabled ? ` Â· ${shownVideos} / ${quota.video_limit} videos` : ""} today` : " "}
+                    {quota ? `${photoCounter}${videoEnabled ? ` · ${shownVideos} / ${quota.video_limit} videos` : ""} today` : " "}
                   </span>
                 </div>
                 {failedCount > 0 && (
@@ -438,7 +438,7 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: st
           disabled={submitting}
           className="h-14 shrink-0 rounded-xl bg-accent px-6 text-lg font-semibold text-on-accent active:bg-accent-strong disabled:bg-surface disabled:text-muted"
         >
-          {submitting ? "Joiningâ€¦" : "Join"}
+          {submitting ? "Joining…" : "Join"}
         </button>
       </div>
       {error && (
@@ -467,7 +467,7 @@ function Lightbox({ photo, timeZone, onClose }: { photo: Photo; timeZone: string
       <div className="flex size-full flex-col">
         <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
           <p className="min-w-0 truncate text-sm">
-            {photo.taken_by ?? "Guest"} Â· {formatTime(photo.taken_at, timeZone)}
+            {photo.taken_by ?? "Guest"} · {formatTime(photo.taken_at, timeZone)}
           </p>
           <button type="button" onClick={onClose} className="h-11 shrink-0 rounded-lg px-3 font-medium active:bg-white/20">
             Close
