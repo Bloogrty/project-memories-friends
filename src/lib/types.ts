@@ -2,8 +2,11 @@
 
 export type DayStatus = "upcoming" | "open" | "closed";
 
+export type SessionMode = "daily" | "event";
+
 export interface DayInfo {
   code: string;
+  mode: SessionMode;
   status: DayStatus;
   opens_at: string;
   closes_at: string;

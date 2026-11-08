@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { publicConfig } from "@/config";
+import { useClientConfig, useTexts } from "@/lib/client-config";
+import type { Texts } from "@/lib/texts";
 import { cameraSupported, useCamera } from "@/lib/use-camera";
 
 type Stage = "idle" | "recording" | "review";
@@ -14,14 +15,14 @@ const POSTER_MAX_EDGE_PX = 640;
 const DATA_INTERVAL_MS = 500;
 const TIMER_INTERVAL_MS = 200;
 
-function unsupportedMessage() {
+function unsupportedMessage(t: Texts) {
   if (!cameraSupported() || typeof MediaRecorder === "undefined") {
-    return "Video recording needs the secure (https) link and an up-to-date browser.";
+    return t.videoNeedsHttps;
   }
   return null;
 }
 
-function capturePoster(video: HTMLVideoElement) {
+function capturePoster(video: HTMLVideoElement, jpegQuality: number) {
   const scale = Math.min(1, POSTER_MAX_EDGE_PX / Math.max(video.videoWidth, video.videoHeight));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(video.videoWidth * scale);
@@ -31,7 +32,7 @@ function capturePoster(video: HTMLVideoElement) {
     canvas.toBlob(
       (blob) => (blob ? resolve(blob) : reject(new Error("Could not capture a preview."))),
       "image/jpeg",
-      publicConfig.clientJpegQuality,
+      jpegQuality,
     );
   });
 }
@@ -47,13 +48,15 @@ export function VideoRecorder({
   onCancel: () => void;
   onRecorded: (video: Blob, poster: Blob) => void;
 }) {
+  const config = useClientConfig();
+  const t = useTexts();
   const { preview, stream, ready, failed, flip } = useCamera({
     audio: true,
-    maxEdgePx: publicConfig.videoMaxEdgePx,
+    maxEdgePx: config.videoMaxEdgePx,
     aspect: VIDEO_ASPECT,
   });
   const [stage, setStage] = useState<Stage>("idle");
-  const [error, setError] = useState<string | null>(unsupportedMessage);
+  const [error, setError] = useState<string | null>(() => unsupportedMessage(t));
   const [elapsed, setElapsed] = useState(0);
   const [clip, setClip] = useState<{ blob: Blob; url: string } | null>(null);
 
@@ -88,33 +91,33 @@ export function VideoRecorder({
     if (!stream.current || !preview.current) return;
     const mimeType = RECORDING_TYPES.find((type) => MediaRecorder.isTypeSupported(type));
     if (!mimeType) {
-      setError("This browser can't record video.");
+      setError(t.videoUnsupported);
       return;
     }
     try {
-      poster.current = await capturePoster(preview.current);
+      poster.current = await capturePoster(preview.current, config.image.jpegQuality);
       const chunks: Blob[] = [];
       let size = 0;
       const next = new MediaRecorder(stream.current, {
         mimeType,
-        videoBitsPerSecond: publicConfig.videoBitsPerSecond,
+        videoBitsPerSecond: config.videoBitsPerSecond,
         audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
       });
       next.ondataavailable = (event) => {
         chunks.push(event.data);
         size += event.data.size;
         // Bitrates are only approximate, so also stop before the file outgrows the upload limit.
-        if (size >= publicConfig.videoTargetBytes) stopRecording();
+        if (size >= config.videoTargetBytes) stopRecording();
       };
       next.onstop = () => {
         if (discarded.current) return;
         const blob = new Blob(chunks, { type: mimeType });
         if (blob.size === 0 || !poster.current) {
           setStage("idle");
-          setError("Nothing was recorded. Please try again.");
+          setError(t.videoEmpty);
           return;
         }
-        if (!publicConfig.reviewVideoBeforeUpload) {
+        if (!config.reviewVideoBeforeUpload) {
           onRecorded(blob, poster.current);
           return;
         }
@@ -130,11 +133,11 @@ export function VideoRecorder({
       setStage("recording");
       timer.current = setInterval(() => {
         const seconds = (Date.now() - startedAt) / 1000;
-        setElapsed(Math.min(seconds, publicConfig.videoMaxSeconds));
-        if (seconds >= publicConfig.videoMaxSeconds) stopRecording();
+        setElapsed(Math.min(seconds, config.videoMaxSeconds));
+        if (seconds >= config.videoMaxSeconds) stopRecording();
       }, TIMER_INTERVAL_MS);
     } catch {
-      setError("Recording couldn't start. Please try again.");
+      setError(t.videoStartFailed);
     }
   }
 
@@ -144,7 +147,7 @@ export function VideoRecorder({
     setStage("idle");
   }
 
-  const message = error ?? (failed ? "Please allow the camera and microphone in your browser settings, then try again." : null);
+  const message = error ?? (failed ? t.videoPermission : null);
 
   return (
     <dialog ref={dialog} onClose={onCancel} className="m-0 size-full max-h-none max-w-none bg-black text-white backdrop:bg-black">
@@ -152,16 +155,16 @@ export function VideoRecorder({
         <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
           <p className="text-sm tabular-nums">
             {stage === "recording" && <span aria-hidden className="mr-2 inline-block size-2.5 rounded-full bg-red-500" />}
-            {formatSeconds(elapsed)} / {formatSeconds(publicConfig.videoMaxSeconds)}
+            {formatSeconds(elapsed)} / {formatSeconds(config.videoMaxSeconds)}
           </p>
           <button type="button" onClick={onCancel} className="h-11 shrink-0 rounded-lg px-3 font-medium active:bg-white/20">
-            Cancel
+            {t.cancel}
           </button>
         </div>
 
         <div className="relative min-h-0 flex-1">
           <video ref={preview} muted playsInline className={`size-full object-contain ${clip ? "hidden" : ""}`} />
-          {clip && <video src={clip.url} controls playsInline aria-label="Your recording" className="size-full object-contain" />}
+          {clip && <video src={clip.url} controls playsInline aria-label={t.yourRecording} className="size-full object-contain" />}
           {message && (
             <p role="alert" className="absolute inset-x-4 top-4 rounded-lg bg-black/80 p-3 text-center text-sm text-pretty">
               {message}
@@ -172,21 +175,21 @@ export function VideoRecorder({
         {stage === "review" && clip ? (
           <div className="flex min-h-28 items-center justify-center gap-3 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <button type="button" onClick={retake} className="h-14 flex-1 rounded-xl border border-white/50 font-semibold active:bg-white/20">
-              Retake
+              {t.retake}
             </button>
             <button
               type="button"
               onClick={() => poster.current && onRecorded(clip.blob, poster.current)}
               className="h-14 flex-1 rounded-xl bg-accent font-semibold text-on-accent active:bg-accent-strong"
             >
-              Use video
+              {t.useVideo}
             </button>
           </div>
         ) : (
           <div className="grid min-h-28 grid-cols-3 items-center px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {stage === "idle" ? (
               <button type="button" onClick={flip} disabled={!ready} className="h-11 justify-self-start rounded-lg px-3 font-medium active:bg-white/20 disabled:opacity-40">
-                Flip
+                {t.flip}
               </button>
             ) : (
               <span />
@@ -195,7 +198,7 @@ export function VideoRecorder({
               type="button"
               disabled={!ready}
               onClick={() => (stage === "recording" ? stopRecording() : void startRecording())}
-              aria-label={stage === "recording" ? "Stop recording" : "Start recording"}
+              aria-label={stage === "recording" ? t.stopRecording : t.startRecording}
               className="grid size-20 place-items-center justify-self-center rounded-full border-4 border-white disabled:opacity-40"
             >
               <span className={`block bg-red-500 transition-all ${stage === "recording" ? "size-7 rounded-md" : "size-16 rounded-full"}`} />

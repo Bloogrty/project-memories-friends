@@ -17,9 +17,9 @@ export const GET = route<{ code: string; guestId: string }>(async (_request, { c
   ]);
   const quota: Quota = {
     used,
-    limit: config.MAX_PHOTOS_PER_GUEST_PER_DAY,
+    limit: config.MAX_PHOTOS_PER_PERSON,
     video_used,
-    video_limit: config.MAX_VIDEOS_PER_GUEST_PER_DAY,
+    video_limit: config.MAX_VIDEOS_PER_PERSON,
   };
   return json(quota);
 });

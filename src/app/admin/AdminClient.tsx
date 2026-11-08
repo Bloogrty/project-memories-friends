@@ -68,7 +68,9 @@ export function AdminClient() {
           <input id="secret" type="password" required autoComplete="current-password" value={secret} onChange={(event) => setSecret(event.target.value)} className={inputClass} />
         </div>
         <div>
-          <label htmlFor="code" className="mb-1.5 block text-sm font-medium">Day code</label>
+          <label htmlFor="code" className="mb-1.5 block text-sm font-medium">
+            Day code <span className="font-normal text-muted">(a date such as 2026-11-07, or your EVENT_CODE)</span>
+          </label>
           <input id="code" required placeholder="2026-11-07" autoCapitalize="none" value={code} onChange={(event) => setCode(event.target.value)} className={inputClass} />
         </div>
         <button type="submit" disabled={busy} className="h-12 w-full rounded-xl bg-accent font-semibold text-on-accent disabled:bg-surface disabled:text-muted">

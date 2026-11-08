@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { getServerConfig } from "@/config";
+import { getServerConfig, getServerTexts } from "@/config";
 import { getDay } from "./days";
 import { log } from "./logger";
 
@@ -42,19 +42,36 @@ export function route<Params>(
         return json({ error: error.message, ...error.extra }, error.status);
       }
       log.error("request failed", done(500), error);
-      return json({ error: "Something went wrong on the server. Please try again." }, 500);
+      return json({ error: serverErrorText() }, 500);
     }
   };
 }
 
+/** Must never throw itself: it reports errors, which may include a bad config. */
+function serverErrorText() {
+  try {
+    return getServerTexts().serverError;
+  } catch {
+    return "Something went wrong on the server. Please try again.";
+  }
+}
+
 export async function requireDay(code: string) {
   const day = await getDay(code);
-  if (!day) throw new HttpError(404, "This Day doesn't exist.");
+  if (!day) throw new HttpError(404, getServerTexts().dayNotFound);
   return day;
 }
 
 function digest(value: string) {
   return createHash("sha256").update(value).digest();
+}
+
+/** The Live Wall exists only when FEATURE_LIVE_WALL is on, and then only with the right key, if one is set. */
+export function wallAllowed(key: string | null) {
+  const config = getServerConfig();
+  if (!config.FEATURE_LIVE_WALL) return false;
+  if (!config.LIVE_WALL_KEY) return true;
+  return timingSafeEqual(digest(key ?? ""), digest(config.LIVE_WALL_KEY));
 }
 
 export function requireAdmin(request: Request) {

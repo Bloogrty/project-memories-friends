@@ -1,20 +1,32 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from "react";
-import { publicConfig } from "@/config";
+import { useClientConfig, useTexts } from "@/lib/client-config";
 import { useGuest, useRememberedName } from "@/lib/guest-store";
+import type { Texts } from "@/lib/texts";
 import type { DayInfo, GalleryResponse, Photo, Quota } from "@/lib/types";
 import { UploadQueue, type QueuedUpload } from "@/lib/upload-queue";
 import { cameraSupported } from "@/lib/use-camera";
 import { PhotoCamera } from "./PhotoCamera";
 import { VideoRecorder } from "./VideoRecorder";
 
-function formatTime(iso: string, timeZone: string) {
-  return new Intl.DateTimeFormat(undefined, { timeZone, hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+function formatTime(iso: string, timeZone: string, locale: string | undefined) {
+  return new Intl.DateTimeFormat(locale, { timeZone, hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
-function formatDate(iso: string, timeZone: string) {
-  return new Intl.DateTimeFormat(undefined, {
+function formatDateTime(iso: string, timeZone: string, locale: string | undefined) {
+  return new Intl.DateTimeFormat(locale, {
+    timeZone,
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
+function formatDate(iso: string, timeZone: string, locale: string | undefined) {
+  return new Intl.DateTimeFormat(locale, {
     timeZone,
     weekday: "long",
     day: "numeric",
@@ -22,13 +34,9 @@ function formatDate(iso: string, timeZone: string) {
   }).format(new Date(iso));
 }
 
-async function errorMessage(response: Response) {
+async function errorMessage(response: Response, fallback: string) {
   const body = await response.json().catch(() => null);
-  return (body?.error as string | undefined) ?? "Something went wrong. Please try again.";
-}
-
-function countLabel(count: number, singular: string) {
-  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+  return (body?.error as string | undefined) ?? fallback;
 }
 
 async function fetchQuota(code: string, guestId: string): Promise<Quota | "unknown_guest" | "offline" | null> {
@@ -41,13 +49,15 @@ async function fetchQuota(code: string, guestId: string): Promise<Quota | "unkno
   }
 }
 
-function galleryCount(items: Photo[]) {
+function galleryCount(items: Photo[], t: Texts) {
   const videos = items.filter((item) => item.kind === "video").length;
   const photos = items.length - videos;
-  return [photos && countLabel(photos, "photo"), videos && countLabel(videos, "video")].filter(Boolean).join(", ");
+  return [photos && t.photoCount(photos), videos && t.videoCount(videos)].filter(Boolean).join(", ");
 }
 
 export function DayClient({ code }: { code: string }) {
+  const config = useClientConfig();
+  const t = useTexts();
   const { ready, guest, save } = useGuest(code);
   const [gallery, setGallery] = useState<GalleryResponse | null>(null);
   const [missing, setMissing] = useState(false);
@@ -59,7 +69,7 @@ export function DayClient({ code }: { code: string }) {
   const [shooting, setShooting] = useState(false);
   const cameraInput = useRef<HTMLInputElement>(null);
 
-  const [queue] = useState(() => new UploadQueue(code));
+  const [queue] = useState(() => new UploadQueue(code, { ...config, texts: t }));
   const uploads = useSyncExternalStore(queue.subscribe, queue.getSnapshot, queue.getServerSnapshot);
 
   const refreshGallery = useCallback(async () => {
@@ -69,7 +79,7 @@ export function DayClient({ code }: { code: string }) {
         setMissing(true);
         return;
       }
-      if (!response.ok) throw new Error(await errorMessage(response));
+      if (!response.ok) throw new Error(await errorMessage(response, ""));
       const next = (await response.json()) as GalleryResponse;
       setGallery(next);
       setOffline(false);
@@ -81,6 +91,7 @@ export function DayClient({ code }: { code: string }) {
   }, [code, queue]);
 
   // Poll only while the page is on screen, to avoid needless load on the NAS.
+  const pollMs = config.galleryPollMs;
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
@@ -88,7 +99,7 @@ export function DayClient({ code }: { code: string }) {
     async function tick() {
       clearTimeout(timer);
       if (document.visibilityState === "visible") await refreshGallery();
-      if (!stopped) timer = setTimeout(tick, publicConfig.galleryPollMs);
+      if (!stopped) timer = setTimeout(tick, pollMs);
     }
     function onVisibilityChange() {
       if (document.visibilityState === "visible") void tick();
@@ -101,7 +112,7 @@ export function DayClient({ code }: { code: string }) {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [refreshGallery]);
+  }, [refreshGallery, pollMs]);
 
   const guestId = guest?.id;
   const applyQuota = useCallback(
@@ -169,59 +180,75 @@ export function DayClient({ code }: { code: string }) {
 
   function takePhoto() {
     // The in-app camera needs https. Everywhere else, the phone's own camera still works.
-    if (publicConfig.inAppPhotoCamera && !publicConfig.allowGalleryUpload && cameraSupported()) setShooting(true);
+    if (config.inAppPhotoCamera && !config.allowGalleryUpload && cameraSupported()) setShooting(true);
     else cameraInput.current?.click();
   }
 
   if (missing) {
-    return (
-      <Centered title="This link isn't valid">
-        Check that you have the whole link, or ask the person who sent it.
-      </Centered>
-    );
+    return <Centered title={t.invalidLinkTitle}>{t.invalidLinkBody}</Centered>;
   }
   if (!gallery) {
-    return <Centered title={offline ? "Can't reach the album" : "Opening the album…"}>{offline ? "We'll keep trying." : null}</Centered>;
+    return <Centered title={offline ? t.offlineTitle : t.loading}>{offline ? t.offlineBody : null}</Centered>;
   }
 
   const { day, photos } = gallery;
+  const locale = t.locale;
   const shownPhotos = quota ? quota.used + waitingPhotos : 0;
   const shownVideos = quota ? quota.video_used + waitingVideos : 0;
   const atLimit = quota !== null && shownPhotos >= quota.limit;
   const atVideoLimit = quota !== null && shownVideos >= quota.video_limit;
   const videoEnabled = quota !== null && quota.video_limit > 0;
   const hasFooter = day.status === "open" && ready;
-  const photoCounter = quota ? `${shownPhotos} / ${quota.limit} photos` : "";
+  const photoCounter = quota ? t.photoCounter(shownPhotos, quota.limit) : "";
+  const date = formatDate(day.opens_at, day.timezone, locale);
 
   return (
     <main className={`mx-auto flex w-full max-w-3xl flex-1 flex-col ${hasFooter ? "pb-44" : "pb-8"}`}>
-      <header className="px-4 pt-6 pb-4">
-        <p className="text-sm text-muted">{publicConfig.appName}</p>
-        <h1 className="mt-1 font-display text-3xl leading-tight text-balance">{formatDate(day.opens_at, day.timezone)}</h1>
-        <p className="mt-1 text-sm text-muted">
-          <DayStatusLine day={day} />
-          {photos.length > 0 && ` · ${galleryCount(photos)}`}
-        </p>
-        {offline && (
-          <p role="status" className="mt-2 text-sm text-danger">
-            Connection lost. New photos will appear once it&apos;s back.
-          </p>
+      <header>
+        {config.coverImageUrl && (
+          // eslint-disable-next-line @next/next/no-img-element -- one decorative image set in env, any host
+          <img src={config.coverImageUrl} alt="" className="aspect-[3/1] w-full bg-surface object-cover sm:rounded-b-xl" />
         )}
+        <div className="px-4 pt-6 pb-4">
+          {config.logoUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- one decorative image set in env, any host
+            <img src={config.logoUrl} alt="" className="mb-3 h-12 w-auto max-w-[60%] object-contain" />
+          )}
+          {/* A daily album is named by its date; an event by its own title. */}
+          <p className="text-sm text-muted">{day.mode === "daily" ? config.appTitle : date}</p>
+          <h1 className="mt-1 font-display text-3xl leading-tight text-balance">{day.mode === "daily" ? date : config.appTitle}</h1>
+          {config.appSubtitle && <p className="mt-1 text-base text-pretty">{config.appSubtitle}</p>}
+          <p className="mt-1 text-sm text-muted">
+            <DayStatusLine day={day} />
+            {photos.length > 0 && ` · ${galleryCount(photos, t)}`}
+          </p>
+          {offline && (
+            <p role="status" className="mt-2 text-sm text-danger">
+              {t.connectionLost}
+            </p>
+          )}
+        </div>
       </header>
+
+      {day.mode === "event" && day.status !== "open" && day.gallery_visible && <EventNotice day={day} />}
 
       {!day.gallery_visible ? (
         <EmptyState
-          title={day.status === "closed" ? "This album has closed" : "This album hasn't opened yet"}
-          body={
-            day.status === "closed"
-              ? "The photos have been kept safe, but they're no longer on view."
-              : `Come back at ${formatTime(day.opens_at, day.timezone)} to start taking photos.`
-          }
+          title={day.status === "closed" ? t.albumClosedTitle : t.albumNotOpenTitle}
+          body={day.status === "closed" ? t.albumClosedBody : t.albumNotOpenBody(formatTime(day.opens_at, day.timezone, locale))}
         />
       ) : photos.length === 0 && uploads.length === 0 ? (
         <EmptyState
-          title="No photos yet"
-          body={day.status === "open" ? "Be the first. Everyone with this link will see what you take." : "Nobody took a photo on this day."}
+          title={t.emptyTitle}
+          body={
+            day.status === "open"
+              ? t.emptyOpen
+              : day.mode === "daily"
+                ? t.emptyDayOver
+                : day.status === "upcoming"
+                  ? t.emptyEventUpcoming
+                  : t.emptyEventOver
+          }
         />
       ) : (
         <ul className="grid grid-cols-3 gap-0.5 sm:grid-cols-4">
@@ -233,7 +260,7 @@ export function DayClient({ code }: { code: string }) {
               <button
                 type="button"
                 onClick={() => setViewing(photo)}
-                aria-label={`View ${photo.kind}${photo.taken_by ? ` by ${photo.taken_by}` : ""}`}
+                aria-label={t.viewItem(photo.kind, photo.taken_by)}
                 className="relative block aspect-square w-full overflow-hidden bg-surface"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element -- images are already resized by our own proxy */}
@@ -263,7 +290,7 @@ export function DayClient({ code }: { code: string }) {
                   ref={cameraInput}
                   type="file"
                   accept="image/*"
-                  capture={publicConfig.allowGalleryUpload ? undefined : "environment"}
+                  capture={config.allowGalleryUpload ? undefined : "environment"}
                   className="sr-only"
                   tabIndex={-1}
                   aria-hidden
@@ -275,16 +302,18 @@ export function DayClient({ code }: { code: string }) {
                   }}
                 />
                 <div aria-live="polite" className="mb-2 flex items-baseline justify-between gap-3 text-sm">
-                  <span className="truncate text-muted">{sendingCount > 0 ? `Uploading ${sendingCount}…` : (guest.name ?? "Guest")}</span>
+                  <span className="truncate text-muted">{sendingCount > 0 ? t.uploadingCount(sendingCount) : (guest.name ?? t.guest)}</span>
                   <span className="shrink-0 tabular-nums">
-                    {quota ? `${photoCounter}${videoEnabled ? ` · ${shownVideos} / ${quota.video_limit} videos` : ""} today` : " "}
+                    {quota
+                      ? `${photoCounter}${videoEnabled ? t.videoCounter(shownVideos, quota.video_limit) : ""}${day.mode === "daily" ? t.counterToday : ""}`
+                      : " "}
                   </span>
                 </div>
                 {failedCount > 0 && (
                   <div role="alert" className="mb-2 flex items-center justify-between gap-3 text-sm text-danger">
-                    <span>{failedCount} didn&apos;t upload. Check your connection.</span>
+                    <span>{t.failedCount(failedCount)}</span>
                     <button type="button" onClick={() => queue.retryFailed()} className="h-9 shrink-0 rounded-lg border border-danger px-3 font-medium">
-                      Retry
+                      {t.retry}
                     </button>
                   </div>
                 )}
@@ -300,7 +329,7 @@ export function DayClient({ code }: { code: string }) {
                     onClick={takePhoto}
                     className="h-14 min-w-0 flex-2 rounded-xl bg-accent text-lg font-semibold text-on-accent transition-colors active:bg-accent-strong disabled:bg-surface disabled:text-muted"
                   >
-                    {atLimit ? "No photos left" : publicConfig.allowGalleryUpload ? "Add photo" : "Take photo"}
+                    {atLimit ? t.noPhotosLeft : config.allowGalleryUpload ? t.addPhoto : t.takePhoto}
                   </button>
                   {videoEnabled && (
                     <button
@@ -309,7 +338,7 @@ export function DayClient({ code }: { code: string }) {
                       onClick={() => setRecording(true)}
                       className="h-14 min-w-0 flex-1 rounded-xl border border-accent text-lg font-semibold text-accent transition-colors active:bg-surface disabled:border-line disabled:text-muted"
                     >
-                      {atVideoLimit ? "No videos" : "Video"}
+                      {atVideoLimit ? t.noVideosLeft : t.video}
                     </button>
                   )}
                 </div>
@@ -351,7 +380,8 @@ export function DayClient({ code }: { code: string }) {
 }
 
 function UploadTile({ item }: { item: QueuedUpload }) {
-  const label = item.status === "failed" ? "Failed" : item.status === "done" ? null : "Uploading";
+  const t = useTexts();
+  const label = item.status === "failed" ? t.tileFailed : item.status === "done" ? null : t.tileUploading;
   return (
     <li className="relative aspect-square overflow-hidden bg-surface">
       {item.previewUrl && (
@@ -368,12 +398,34 @@ function UploadTile({ item }: { item: QueuedUpload }) {
 }
 
 function DayStatusLine({ day }: { day: DayInfo }) {
-  if (day.status === "open") return <>Open until {formatTime(day.closes_at, day.timezone)}</>;
-  if (day.status === "upcoming") return <>Opens at {formatTime(day.opens_at, day.timezone)}</>;
-  return <>Closed</>;
+  const t = useTexts();
+  if (day.mode === "event") {
+    // An event can run over several days, so its times include the date.
+    if (day.status === "open") return <>{t.openUntil(formatDateTime(day.closes_at, day.timezone, t.locale))}</>;
+    if (day.status === "upcoming") return <>{t.startsAt(formatDateTime(day.opens_at, day.timezone, t.locale))}</>;
+    return <>{t.ended}</>;
+  }
+  if (day.status === "open") return <>{t.openUntil(formatTime(day.closes_at, day.timezone, t.locale))}</>;
+  if (day.status === "upcoming") return <>{t.opensAt(formatTime(day.opens_at, day.timezone, t.locale))}</>;
+  return <>{t.closed}</>;
+}
+
+/** Event mode keeps the album on view outside its window, so say why uploads are off. */
+function EventNotice({ day }: { day: DayInfo }) {
+  const t = useTexts();
+  const upcoming = day.status === "upcoming";
+  return (
+    <section role="status" className="mx-4 mb-4 rounded-xl border border-line px-5 py-4">
+      <h2 className="font-display text-lg text-balance">{upcoming ? t.eventNotStartedTitle : t.eventEndedTitle}</h2>
+      <p className="mt-1 text-sm text-pretty text-muted">
+        {upcoming ? t.eventNotStartedBody(formatDateTime(day.opens_at, day.timezone, t.locale)) : t.eventEndedBody}
+      </p>
+    </section>
+  );
 }
 
 function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: string; name: string | null }) => void }) {
+  const t = useTexts();
   const remembered = useRememberedName();
   const [edited, setEdited] = useState<string | null>(null);
   // Someone who gave a name before joins by themselves, so they go straight to the camera.
@@ -391,17 +443,17 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: st
           body: JSON.stringify({ name: guestName }),
         });
         if (!response.ok) {
-          setError(await errorMessage(response));
+          setError(await errorMessage(response, t.genericError));
           return;
         }
         onJoined((await response.json()) as { id: string; name: string | null });
       } catch {
-        setError("Couldn't connect. Please try again.");
+        setError(t.connectError);
       } finally {
         setSubmitting(false);
       }
     },
-    [code, onJoined],
+    [code, onJoined, t],
   );
 
   useEffect(() => {
@@ -420,7 +472,7 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: st
   return (
     <form onSubmit={onSubmit}>
       <label htmlFor="guest-name" className="mb-1.5 block text-sm font-medium">
-        Your name <span className="font-normal text-muted">(optional)</span>
+        {t.yourName} <span className="font-normal text-muted">{t.optional}</span>
       </label>
       <div className="flex gap-2">
         <input
@@ -436,7 +488,7 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: st
           disabled={submitting}
           className="h-14 shrink-0 rounded-xl bg-accent px-6 text-lg font-semibold text-on-accent active:bg-accent-strong disabled:bg-surface disabled:text-muted"
         >
-          {submitting ? "Joining…" : "Join"}
+          {submitting ? t.joining : t.join}
         </button>
       </div>
       {error && (
@@ -449,7 +501,9 @@ function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: st
 }
 
 function Lightbox({ photo, timeZone, onClose }: { photo: Photo; timeZone: string; onClose: () => void }) {
+  const t = useTexts();
   const dialog = useRef<HTMLDialogElement>(null);
+  const by = photo.taken_by ?? t.aGuest;
 
   // showModal() gives focus trapping and Esc-to-close without extra code.
   useEffect(() => {
@@ -465,10 +519,10 @@ function Lightbox({ photo, timeZone, onClose }: { photo: Photo; timeZone: string
       <div className="flex size-full flex-col">
         <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
           <p className="min-w-0 truncate text-sm">
-            {photo.taken_by ?? "Guest"} · {formatTime(photo.taken_at, timeZone)}
+            {photo.taken_by ?? t.guest} · {formatTime(photo.taken_at, timeZone, t.locale)}
           </p>
           <button type="button" onClick={onClose} className="h-11 shrink-0 rounded-lg px-3 font-medium active:bg-white/20">
-            Close
+            {t.close}
           </button>
         </div>
         {photo.kind === "video" ? (
@@ -477,16 +531,12 @@ function Lightbox({ photo, timeZone, onClose }: { photo: Photo; timeZone: string
             poster={photo.thumb_url}
             controls
             playsInline
-            aria-label={`Video by ${photo.taken_by ?? "a guest"}`}
+            aria-label={t.videoBy(by)}
             className="min-h-0 flex-1 object-contain pb-[env(safe-area-inset-bottom)]"
           />
         ) : (
           // eslint-disable-next-line @next/next/no-img-element -- images are already resized by our own proxy
-          <img
-            src={photo.full_url}
-            alt={`Photo by ${photo.taken_by ?? "a guest"}`}
-            className="min-h-0 flex-1 object-contain pb-[env(safe-area-inset-bottom)]"
-          />
+          <img src={photo.full_url} alt={t.photoBy(by)} className="min-h-0 flex-1 object-contain pb-[env(safe-area-inset-bottom)]" />
         )}
       </div>
     </dialog>

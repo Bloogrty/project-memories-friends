@@ -1,5 +1,10 @@
-import { publicConfig } from "@/config";
+import type { ClientConfig } from "@/config";
 import { compressImage } from "./compress";
+import type { Texts } from "./texts";
+
+type QueueOptions = Pick<ClientConfig, "image" | "uploadConcurrency" | "uploadRetries"> & {
+  texts: Pick<Texts, "photoUnreadable" | "uploadRefused">;
+};
 
 /**
  * Uploads run here in the background, so guests can keep shooting however slow
@@ -28,7 +33,7 @@ export interface UploadHandlers {
 }
 
 type Source = { file?: File; blob?: Blob; poster?: Blob };
-type Entry = QueuedUpload & Source & { guestId: string; attempts: number };
+type Entry = QueuedUpload & Source & { guestId: string; attempts: number; originalBytes?: number };
 
 const EMPTY: QueuedUpload[] = [];
 
@@ -40,7 +45,10 @@ export class UploadQueue {
   private nextKey = 1;
   private listeners = new Set<() => void>();
 
-  constructor(private readonly code: string) {}
+  constructor(
+    private readonly code: string,
+    private readonly options: QueueOptions,
+  ) {}
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -108,7 +116,7 @@ export class UploadQueue {
   }
 
   private pump() {
-    while (this.active < publicConfig.uploadConcurrency) {
+    while (this.active < this.options.uploadConcurrency) {
       // Oldest first, so photos arrive in the order they were taken.
       const next = this.entries.findLast((entry) => entry.status === "waiting");
       if (!next) break;
@@ -127,18 +135,22 @@ export class UploadQueue {
   private async send(entry: Entry) {
     if (!entry.blob && entry.file) {
       try {
-        entry.blob = await compressImage(entry.file);
+        entry.originalBytes = entry.file.size;
+        entry.blob = await compressImage(entry.file, this.options.image);
         entry.file = undefined;
         entry.previewUrl = URL.createObjectURL(entry.blob);
         this.publish();
       } catch {
-        this.reject(entry, "That photo couldn't be read.", null);
+        this.reject(entry, this.options.texts.photoUnreadable, null);
         return;
       }
     }
 
     const form = new FormData();
     form.append("guestId", entry.guestId);
+    // Only for the server log, to show what compression saved. In-app camera
+    // shots are taken straight at the reduced size, so they have no original.
+    if (entry.originalBytes) form.append("originalBytes", String(entry.originalBytes));
     if (entry.kind === "video") {
       form.append("video", entry.blob!, "video");
       form.append("poster", entry.poster!, "poster.jpg");
@@ -160,7 +172,7 @@ export class UploadQueue {
 
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     if (!response.ok) {
-      this.reject(entry, (body?.error as string) ?? "That upload was refused.", body);
+      this.reject(entry, (body?.error as string) ?? this.options.texts.uploadRefused, body);
       return;
     }
     // Keep the local preview until the gallery shows the real file, to avoid a flicker.
@@ -180,7 +192,7 @@ export class UploadQueue {
   /** Connection problems and server errors are usually temporary. */
   private retryLater(entry: Entry) {
     entry.attempts++;
-    if (entry.attempts > publicConfig.uploadRetries) {
+    if (entry.attempts > this.options.uploadRetries) {
       entry.status = "failed";
       this.publish();
       return;
