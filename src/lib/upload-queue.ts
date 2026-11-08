@@ -1,7 +1,10 @@
 import type { ClientConfig } from "@/config";
 import { compressImage } from "./compress";
+import type { Texts } from "./texts";
 
-type QueueOptions = Pick<ClientConfig, "image" | "uploadConcurrency" | "uploadRetries">;
+type QueueOptions = Pick<ClientConfig, "image" | "uploadConcurrency" | "uploadRetries"> & {
+  texts: Pick<Texts, "photoUnreadable" | "uploadRefused">;
+};
 
 /**
  * Uploads run here in the background, so guests can keep shooting however slow
@@ -137,7 +140,7 @@ export class UploadQueue {
         entry.previewUrl = URL.createObjectURL(entry.blob);
         this.publish();
       } catch {
-        this.reject(entry, "That photo couldn't be read.", null);
+        this.reject(entry, this.options.texts.photoUnreadable, null);
         return;
       }
     }
@@ -165,7 +168,7 @@ export class UploadQueue {
 
     const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
     if (!response.ok) {
-      this.reject(entry, (body?.error as string) ?? "That upload was refused.", body);
+      this.reject(entry, (body?.error as string) ?? this.options.texts.uploadRefused, body);
       return;
     }
     // Keep the local preview until the gallery shows the real file, to avoid a flicker.

@@ -1,9 +1,9 @@
-import { getServerConfig } from "@/config";
+import { getServerConfig, getServerTexts } from "@/config";
 import { HttpError, json, requireDay, route } from "@/lib/http";
 import { log } from "@/lib/logger";
 import { countGuestPhotos, InvalidMediaError, listMedia, savePhoto } from "@/lib/photos";
 import type { GalleryResponse } from "@/lib/types";
-import { fileToBuffer, readUploadForm, requireFile, requireGuest } from "@/lib/uploads";
+import { fileToBuffer, limitMessage, readUploadForm, requireFile, requireGuest } from "@/lib/uploads";
 
 /** The gallery: photos and videos together. */
 export const GET = route<{ code: string }>(async (_request, { code }) => {
@@ -21,7 +21,7 @@ export const POST = route<{ code: string }>(async (request, { code }) => {
   const limit = config.MAX_PHOTOS_PER_PERSON;
   const used = await countGuestPhotos(code, guestId);
   if (used >= limit) {
-    throw new HttpError(429, "You've reached today's photo limit.", { code: "quota_reached", used, limit });
+    throw new HttpError(429, limitMessage("photo"), { code: "quota_reached", used, limit });
   }
 
   try {
@@ -29,7 +29,10 @@ export const POST = route<{ code: string }>(async (request, { code }) => {
     log.info("photo saved", { day: code, guest: guestId, bytes: photo.size, used: used + 1, limit });
     return json({ id, used: used + 1, limit }, 201);
   } catch (error) {
-    if (error instanceof InvalidMediaError) throw new HttpError(415, error.message);
+    if (error instanceof InvalidMediaError) {
+      log.warn("photo rejected", { day: code, guest: guestId, reason: error.message });
+      throw new HttpError(415, getServerTexts().fileUnreadable);
+    }
     throw error;
   }
 });

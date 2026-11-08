@@ -1,8 +1,8 @@
-import { getServerConfig } from "@/config";
+import { getServerConfig, getServerTexts } from "@/config";
 import { HttpError, json, route } from "@/lib/http";
 import { log } from "@/lib/logger";
 import { countGuestVideos, InvalidMediaError, saveVideo } from "@/lib/photos";
-import { fileToBuffer, readUploadForm, requireFile, requireGuest } from "@/lib/uploads";
+import { fileToBuffer, limitMessage, readUploadForm, requireFile, requireGuest } from "@/lib/uploads";
 
 export const POST = route<{ code: string }>(async (request, { code }) => {
   const config = getServerConfig();
@@ -14,7 +14,7 @@ export const POST = route<{ code: string }>(async (request, { code }) => {
   const video_limit = config.MAX_VIDEOS_PER_PERSON;
   const video_used = await countGuestVideos(code, guestId);
   if (video_used >= video_limit) {
-    throw new HttpError(429, "You've reached today's video limit.", {
+    throw new HttpError(429, limitMessage("video"), {
       code: "video_quota_reached",
       video_used,
       video_limit,
@@ -26,7 +26,10 @@ export const POST = route<{ code: string }>(async (request, { code }) => {
     log.info("video saved", { day: code, guest: guestId, bytes: video.size, type: video.type, used: video_used + 1, limit: video_limit });
     return json({ id, video_used: video_used + 1, video_limit }, 201);
   } catch (error) {
-    if (error instanceof InvalidMediaError) throw new HttpError(415, error.message);
+    if (error instanceof InvalidMediaError) {
+      log.warn("video rejected", { day: code, guest: guestId, reason: error.message });
+      throw new HttpError(415, getServerTexts().fileUnreadable);
+    }
     throw error;
   }
 });

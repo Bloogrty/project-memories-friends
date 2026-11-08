@@ -1,7 +1,8 @@
 "use client";
 
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { ClientConfig } from "@/config";
+import { getTexts, type Texts } from "./texts";
 
 /**
  * The browser's copy of the settings. The root layout reads them on the server
@@ -17,4 +18,10 @@ export function useClientConfig(): ClientConfig {
   const config = useContext(ClientConfigContext);
   if (!config) throw new Error("useClientConfig must be used inside ClientConfigProvider (src/app/layout.tsx).");
   return config;
+}
+
+/** All guest-facing text, in UI_LANGUAGE. */
+export function useTexts(): Texts {
+  const { language, textOverrides } = useClientConfig();
+  return useMemo(() => getTexts(language, textOverrides), [language, textOverrides]);
 }

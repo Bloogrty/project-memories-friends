@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useClientConfig } from "@/lib/client-config";
+import { useClientConfig, useTexts } from "@/lib/client-config";
 import { captureFrame } from "@/lib/compress";
 import { useCamera } from "@/lib/use-camera";
 
@@ -25,6 +25,7 @@ export function PhotoCamera({
   onUsePhoneCamera: () => void;
 }) {
   const config = useClientConfig();
+  const t = useTexts();
   const { preview, ready, failed, flip } = useCamera({
     audio: false,
     maxEdgePx: config.image.maxEdgePx,
@@ -43,7 +44,7 @@ export function PhotoCamera({
     setFlash((count) => count + 1);
     navigator.vibrate?.(SHUTTER_VIBRATE_MS);
     setError(null);
-    captureFrame(preview.current, config.image).then(onCapture, () => setError("That photo didn't work. Please try again."));
+    captureFrame(preview.current, config.image).then(onCapture, () => setError(t.photoFailed));
   }
 
   return (
@@ -52,10 +53,10 @@ export function PhotoCamera({
         <div className="flex items-center justify-between gap-3 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3">
           <p aria-live="polite" className="min-w-0 truncate text-sm tabular-nums">
             {counter}
-            {uploading > 0 && ` · ${uploading} uploading`}
+            {uploading > 0 && t.cameraUploading(uploading)}
           </p>
           <button type="button" onClick={onClose} className="h-11 shrink-0 rounded-lg px-3 font-medium active:bg-white/20">
-            Done
+            {t.done}
           </button>
         </div>
 
@@ -65,10 +66,10 @@ export function PhotoCamera({
           {failed && (
             <div className="absolute inset-x-4 top-4 rounded-lg bg-black/80 p-4 text-center">
               <p role="alert" className="text-sm text-pretty">
-                The camera didn&apos;t open. You can allow it in your browser settings, or use your phone&apos;s camera instead.
+                {t.cameraFailed}
               </p>
               <button type="button" onClick={onUsePhoneCamera} className="mt-3 h-11 rounded-lg bg-white px-4 font-semibold text-black">
-                Use phone camera
+                {t.usePhoneCamera}
               </button>
             </div>
           )}
@@ -81,18 +82,18 @@ export function PhotoCamera({
 
         <div className="grid min-h-28 grid-cols-3 items-center px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <button type="button" onClick={flip} disabled={!ready} className="h-11 justify-self-start rounded-lg px-3 font-medium active:bg-white/20 disabled:opacity-40">
-            Flip
+            {t.flip}
           </button>
           <button
             type="button"
             onClick={shoot}
             disabled={!ready || !canShoot}
-            aria-label="Take photo"
+            aria-label={t.takePhoto}
             className="grid size-20 place-items-center justify-self-center rounded-full border-4 border-white disabled:opacity-40"
           >
             <span className="block size-16 rounded-full bg-white transition-transform active:scale-90" />
           </button>
-          {!canShoot && <p className="text-right text-sm">No photos left</p>}
+          {!canShoot && <p className="text-right text-sm">{t.noPhotosLeft}</p>}
         </div>
       </div>
     </dialog>

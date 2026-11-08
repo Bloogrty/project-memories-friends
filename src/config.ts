@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { getTexts, LANGUAGES } from "@/lib/texts";
+import { HEX_COLOR } from "@/lib/theme";
 import { parseDateTime } from "@/lib/timezone";
 import { isDayCode } from "@/lib/validation";
 
@@ -24,6 +26,7 @@ const RENAMED: Record<string, string> = {
   SESSION_MODE: "DAY_MODE",
   MAX_PHOTOS_PER_PERSON: "MAX_PHOTOS_PER_GUEST_PER_DAY",
   MAX_VIDEOS_PER_PERSON: "MAX_VIDEOS_PER_GUEST_PER_DAY",
+  APP_TITLE: "NEXT_PUBLIC_APP_NAME",
   ALLOW_GALLERY_UPLOAD: "NEXT_PUBLIC_ALLOW_GALLERY_UPLOAD",
   GALLERY_POLL_SECONDS: "NEXT_PUBLIC_GALLERY_POLL_SECONDS",
   VIDEO_MAX_SECONDS: "NEXT_PUBLIC_VIDEO_MAX_SECONDS",
@@ -51,6 +54,10 @@ const timezone = z.string().refine((value) => {
     return false;
   }
 }, "must be a valid IANA timezone, e.g. Asia/Jakarta");
+// A file in public/ ("/logo.png") or a full web address.
+const imageUrl = z
+  .string()
+  .refine((value) => value.startsWith("/") || /^https?:\/\/\S+$/.test(value), "must start with / (a file in public/) or https://");
 
 /** process.env with blanks removed (`NAME=` means "not set") and old names copied to new ones. */
 function readEnv() {
@@ -83,7 +90,14 @@ export function renamedVariablesInUse() {
 // ---------- Settings the browser needs (no secrets) ----------
 
 const clientSchema = z.object({
-  NEXT_PUBLIC_APP_NAME: z.string().default("Memories"),
+  APP_TITLE: z.string().default("Memories"),
+  APP_SUBTITLE: z.string().optional(),
+  THEME_PRIMARY: z.string().regex(HEX_COLOR, "must be a hex colour such as #b5482a").optional(),
+  LOGO_URL: imageUrl.optional(),
+  COVER_IMAGE_URL: imageUrl.optional(),
+  UI_LANGUAGE: z.enum(LANGUAGES).default("en"),
+  EVENT_NOT_STARTED_TEXT: z.string().optional(),
+  EVENT_ENDED_TEXT: z.string().optional(),
   ALLOW_GALLERY_UPLOAD: bool.default(false),
   NEXT_PUBLIC_CLIENT_MAX_EDGE_PX: z.coerce.number().int().min(320).default(2048),
   NEXT_PUBLIC_CLIENT_JPEG_QUALITY: z.coerce.number().gt(0).max(1).default(0.8),
@@ -101,7 +115,16 @@ const clientSchema = z.object({
 
 function toClientConfig(env: z.output<typeof clientSchema>) {
   return {
-    appName: env.NEXT_PUBLIC_APP_NAME,
+    appTitle: env.APP_TITLE,
+    appSubtitle: env.APP_SUBTITLE ?? null,
+    themePrimary: env.THEME_PRIMARY ?? null,
+    logoUrl: env.LOGO_URL ?? null,
+    coverImageUrl: env.COVER_IMAGE_URL ?? null,
+    language: env.UI_LANGUAGE,
+    textOverrides: {
+      eventNotStartedText: env.EVENT_NOT_STARTED_TEXT ?? null,
+      eventEndedText: env.EVENT_ENDED_TEXT ?? null,
+    },
     allowGalleryUpload: env.ALLOW_GALLERY_UPLOAD,
     image: {
       maxEdgePx: env.NEXT_PUBLIC_CLIENT_MAX_EDGE_PX,
@@ -127,6 +150,12 @@ let clientConfig: ClientConfig | undefined;
 export function getClientConfig(): ClientConfig {
   clientConfig ??= toClientConfig(parseEnv(clientSchema));
   return clientConfig;
+}
+
+/** Texts for API replies, in the same language as the pages. */
+export function getServerTexts() {
+  const config = getClientConfig();
+  return getTexts(config.language, config.textOverrides);
 }
 
 // ---------- Server-only settings (secrets live here) ----------
