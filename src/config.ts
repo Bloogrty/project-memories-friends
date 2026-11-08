@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { parseDateTime } from "@/lib/timezone";
+import { isDayCode } from "@/lib/validation";
 
 /**
  * The only module that reads process.env. Server-side only: browser code gets
@@ -19,6 +21,9 @@ import { z } from "zod";
  * set, the new name wins.
  */
 const RENAMED: Record<string, string> = {
+  SESSION_MODE: "DAY_MODE",
+  MAX_PHOTOS_PER_PERSON: "MAX_PHOTOS_PER_GUEST_PER_DAY",
+  MAX_VIDEOS_PER_PERSON: "MAX_VIDEOS_PER_GUEST_PER_DAY",
   ALLOW_GALLERY_UPLOAD: "NEXT_PUBLIC_ALLOW_GALLERY_UPLOAD",
   GALLERY_POLL_SECONDS: "NEXT_PUBLIC_GALLERY_POLL_SECONDS",
   VIDEO_MAX_SECONDS: "NEXT_PUBLIC_VIDEO_MAX_SECONDS",
@@ -137,9 +142,21 @@ const serverSchema = z
     WEBDAV_ROOT: z.string().default("/project__memories"),
     ADMIN_SECRET: z.string().min(16, "must be at least 16 characters"),
     APP_TIMEZONE: timezone.default("Asia/Jakarta"),
-    MAX_PHOTOS_PER_GUEST_PER_DAY: z.coerce.number().int().positive().default(30),
+    // "calendar" is the old DAY_MODE name for daily.
+    SESSION_MODE: z
+      .enum(["daily", "event", "calendar"])
+      .default("daily")
+      .transform((mode) => (mode === "calendar" ? "daily" : mode)),
+    EVENT_CODE: z
+      .string()
+      .refine(isDayCode, "must be lowercase letters, digits and dashes, e.g. wedding-andi-sari")
+      .default("event"),
+    EVENT_START: z.string().optional(),
+    EVENT_END: z.string().optional(),
+    // Per guest, per session (one day in daily mode, the whole event in event mode).
+    MAX_PHOTOS_PER_PERSON: z.coerce.number().int().positive().default(30),
     // 0 turns video off: the UI hides the button when the API reports a limit of 0.
-    MAX_VIDEOS_PER_GUEST_PER_DAY: z.coerce.number().int().min(0).default(5),
+    MAX_VIDEOS_PER_PERSON: z.coerce.number().int().min(0).default(5),
     // Vercel rejects request bodies over ~4.5 MB, including multipart overhead.
     MAX_UPLOAD_MB: z.coerce.number().positive().max(4.4, "must stay under Vercel's 4.5 MB limit").default(4),
     MAX_GUEST_NAME_LENGTH: z.coerce.number().int().positive().default(40),
@@ -150,10 +167,10 @@ const serverSchema = z
     THUMB_JPEG_QUALITY: z.coerce.number().int().min(1).max(100).default(70),
     STRIP_EXIF: bool.default(true),
     PHOTO_CACHE_SECONDS: z.coerce.number().int().min(0).default(86400),
-    DAY_MODE: z.enum(["calendar", "event"]).default("calendar"),
     DAY_OPEN_TIME: clockTime.default("00:00"),
     DAY_CLOSE_TIME: clockTime.default("23:59"),
-    GALLERY_AFTER_CLOSE: z.enum(["hidden", "readonly"]).default("hidden"),
+    // Default depends on the mode, see below.
+    GALLERY_AFTER_CLOSE: z.enum(["hidden", "readonly"]).optional(),
     LOG_ENABLED: bool.default(true),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   })
@@ -161,12 +178,28 @@ const serverSchema = z
     ...env,
     // Local files don't exist on Vercel, so production defaults to the NAS.
     STORAGE_DRIVER: env.STORAGE_DRIVER ?? (env.NODE_ENV === "production" ? ("webdav" as const) : ("local" as const)),
+    // Friends' daily albums disappear at midnight; an event album stays to look back on.
+    GALLERY_AFTER_CLOSE: env.GALLERY_AFTER_CLOSE ?? (env.SESSION_MODE === "event" ? ("readonly" as const) : ("hidden" as const)),
+    EVENT_START_MS: env.EVENT_START ? parseDateTime(env.EVENT_START, env.APP_TIMEZONE) : null,
+    EVENT_END_MS: env.EVENT_END ? parseDateTime(env.EVENT_END, env.APP_TIMEZONE) : null,
   }))
   .superRefine((env, ctx) => {
-    if (env.STORAGE_DRIVER !== "webdav") return;
-    for (const key of ["WEBDAV_URL", "WEBDAV_USERNAME", "WEBDAV_PASSWORD"] as const) {
-      if (!env[key]) {
-        ctx.addIssue({ code: "custom", path: [key], message: "is required when STORAGE_DRIVER=webdav" });
+    const issue = (path: string, message: string) => ctx.addIssue({ code: "custom", path: [path], message });
+
+    if (env.STORAGE_DRIVER === "webdav") {
+      for (const key of ["WEBDAV_URL", "WEBDAV_USERNAME", "WEBDAV_PASSWORD"] as const) {
+        if (!env[key]) issue(key, "is required when STORAGE_DRIVER=webdav");
+      }
+    }
+
+    if (env.SESSION_MODE === "event") {
+      const format = "must be an ISO date and time, e.g. 2026-12-20T16:00 (in APP_TIMEZONE) or 2026-12-20T16:00+07:00";
+      for (const key of ["EVENT_START", "EVENT_END"] as const) {
+        if (!env[key]) issue(key, "is required when SESSION_MODE=event");
+        else if (env[`${key}_MS`] === null) issue(key, format);
+      }
+      if (env.EVENT_START_MS !== null && env.EVENT_END_MS !== null && env.EVENT_END_MS <= env.EVENT_START_MS) {
+        issue("EVENT_END", "must be later than EVENT_START");
       }
     }
   });

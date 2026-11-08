@@ -7,10 +7,15 @@ export function register() {
   getClientConfig();
   log.info("server started", {
     storage: config.STORAGE_DRIVER,
-    day_mode: config.DAY_MODE,
+    session_mode: config.SESSION_MODE,
+    ...(config.SESSION_MODE === "event" && {
+      event_code: config.EVENT_CODE,
+      event_start: new Date(config.EVENT_START_MS!).toISOString(),
+      event_end: new Date(config.EVENT_END_MS!).toISOString(),
+    }),
     timezone: config.APP_TIMEZONE,
-    max_photos: config.MAX_PHOTOS_PER_GUEST_PER_DAY,
-    max_videos: config.MAX_VIDEOS_PER_GUEST_PER_DAY,
+    max_photos: config.MAX_PHOTOS_PER_PERSON,
+    max_videos: config.MAX_VIDEOS_PER_PERSON,
     gallery_after_close: config.GALLERY_AFTER_CLOSE,
     log_level: config.LOG_LEVEL,
   });

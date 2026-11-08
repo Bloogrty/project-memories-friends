@@ -13,6 +13,17 @@ function formatTime(iso: string, timeZone: string) {
   return new Intl.DateTimeFormat(undefined, { timeZone, hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
 }
 
+function formatDateTime(iso: string, timeZone: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone,
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
+}
+
 function formatDate(iso: string, timeZone: string) {
   return new Intl.DateTimeFormat(undefined, {
     timeZone,
@@ -211,6 +222,8 @@ export function DayClient({ code }: { code: string }) {
         )}
       </header>
 
+      {day.mode === "event" && day.status !== "open" && day.gallery_visible && <EventNotice day={day} />}
+
       {!day.gallery_visible ? (
         <EmptyState
           title={day.status === "closed" ? "This album has closed" : "This album hasn't opened yet"}
@@ -223,7 +236,15 @@ export function DayClient({ code }: { code: string }) {
       ) : photos.length === 0 && uploads.length === 0 ? (
         <EmptyState
           title="No photos yet"
-          body={day.status === "open" ? "Be the first. Everyone with this link will see what you take." : "Nobody took a photo on this day."}
+          body={
+            day.status === "open"
+              ? "Be the first. Everyone with this link will see what you take."
+              : day.mode === "daily"
+                ? "Nobody took a photo on this day."
+                : day.status === "upcoming"
+                  ? "Photos will appear here once the event starts."
+                  : "No photos were shared at this event."
+          }
         />
       ) : (
         <ul className="grid grid-cols-3 gap-0.5 sm:grid-cols-4">
@@ -279,7 +300,7 @@ export function DayClient({ code }: { code: string }) {
                 <div aria-live="polite" className="mb-2 flex items-baseline justify-between gap-3 text-sm">
                   <span className="truncate text-muted">{sendingCount > 0 ? `Uploading ${sendingCount}…` : (guest.name ?? "Guest")}</span>
                   <span className="shrink-0 tabular-nums">
-                    {quota ? `${photoCounter}${videoEnabled ? ` · ${shownVideos} / ${quota.video_limit} videos` : ""} today` : " "}
+                    {quota ? `${photoCounter}${videoEnabled ? ` · ${shownVideos} / ${quota.video_limit} videos` : ""}${day.mode === "daily" ? " today" : ""}` : " "}
                   </span>
                 </div>
                 {failedCount > 0 && (
@@ -370,9 +391,32 @@ function UploadTile({ item }: { item: QueuedUpload }) {
 }
 
 function DayStatusLine({ day }: { day: DayInfo }) {
+  if (day.mode === "event") {
+    // An event can run over several days, so its times include the date.
+    if (day.status === "open") return <>Open until {formatDateTime(day.closes_at, day.timezone)}</>;
+    if (day.status === "upcoming") return <>Starts {formatDateTime(day.opens_at, day.timezone)}</>;
+    return <>Ended</>;
+  }
   if (day.status === "open") return <>Open until {formatTime(day.closes_at, day.timezone)}</>;
   if (day.status === "upcoming") return <>Opens at {formatTime(day.opens_at, day.timezone)}</>;
   return <>Closed</>;
+}
+
+/** Event mode keeps the album on view outside its window, so say why uploads are off. */
+function EventNotice({ day }: { day: DayInfo }) {
+  const upcoming = day.status === "upcoming";
+  return (
+    <section role="status" className="mx-4 mb-4 rounded-xl border border-line px-5 py-4">
+      <h2 className="font-display text-lg text-balance">
+        {upcoming ? "This event hasn't started yet" : "This event has ended"}
+      </h2>
+      <p className="mt-1 text-sm text-pretty text-muted">
+        {upcoming
+          ? `You can take photos from ${formatDateTime(day.opens_at, day.timezone)}.`
+          : "Uploads are closed. Thanks for sharing your photos!"}
+      </p>
+    </section>
+  );
 }
 
 function JoinForm({ code, onJoined }: { code: string; onJoined: (guest: { id: string; name: string | null }) => void }) {

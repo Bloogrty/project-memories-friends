@@ -18,7 +18,7 @@ export const POST = route<{ code: string }>(async (request, { code }) => {
   const photo = requireFile(form.get("photo"), config.ALLOWED_MIME_TYPES);
   await requireGuest(code, guestId);
 
-  const limit = config.MAX_PHOTOS_PER_GUEST_PER_DAY;
+  const limit = config.MAX_PHOTOS_PER_PERSON;
   const used = await countGuestPhotos(code, guestId);
   if (used >= limit) {
     throw new HttpError(429, "You've reached today's photo limit.", { code: "quota_reached", used, limit });

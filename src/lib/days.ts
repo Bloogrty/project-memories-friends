@@ -1,51 +1,22 @@
 import { getServerConfig } from "@/config";
 import { readJson, writeJson } from "./storage";
+import { wallClockParts, zonedTimeToUtcMs } from "./timezone";
 import type { DayInfo, DayStatus } from "./types";
 import { isDayCode } from "./validation";
 
-/** Optional per-Day settings at <day_code>/day.json. Required for event-mode Days. */
+/**
+ * A "Day" is one album with its own link and upload window:
+ * - daily mode: one per calendar date, code YYYY-MM-DD, times from DAY_OPEN_TIME / DAY_CLOSE_TIME.
+ * - event mode: exactly one, code EVENT_CODE, times from EVENT_START / EVENT_END.
+ */
+
+/** Optional per-Day state at <day_code>/day.json, written when admin closes a Day early. */
 interface DayFile {
-  opens_at?: string;
-  closes_at?: string;
   closed_at?: string;
 }
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
-
-function wallClockParts(utcMs: number, timeZone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hourCycle: "h23",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-  }).formatToParts(new Date(utcMs));
-  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value);
-  return {
-    year: get("year"),
-    month: get("month"),
-    day: get("day"),
-    hour: get("hour"),
-    minute: get("minute"),
-    second: get("second"),
-  };
-}
-
-function timeZoneOffsetMs(utcMs: number, timeZone: string) {
-  const p = wallClockParts(utcMs, timeZone);
-  const wall = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
-  return wall - Math.floor(utcMs / 1000) * 1000;
-}
-
-/** Converts a wall-clock time in `timeZone` to UTC. Vercel runs in UTC, so this must be explicit. */
-function zonedTimeToUtcMs(wallMs: number, timeZone: string) {
-  const guess = wallMs - timeZoneOffsetMs(wallMs, timeZone);
-  return wallMs - timeZoneOffsetMs(guess, timeZone);
-}
 
 export function todayCode(now = Date.now()) {
   const p = wallClockParts(now, getServerConfig().APP_TIMEZONE);
@@ -53,12 +24,18 @@ export function todayCode(now = Date.now()) {
   return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
 }
 
+/** The code guests should land on from the home URL. */
+export function currentCode() {
+  const config = getServerConfig();
+  return config.SESSION_MODE === "event" ? config.EVENT_CODE : todayCode();
+}
+
 function clockToMinutes(clock: string) {
   const [hours, minutes] = clock.split(":").map(Number);
   return hours * 60 + minutes;
 }
 
-/** Calendar Days use the code as their date. Returns null for anything that isn't a real date. */
+/** Daily Days use the code as their date. Returns null for anything that isn't a real date. */
 function calendarWindow(code: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(code);
   if (!match) return null;
@@ -76,6 +53,13 @@ function calendarWindow(code: string) {
   };
 }
 
+/** Event mode has one Day. Its times are validated at startup, so they are set here. */
+function eventWindow(code: string) {
+  const config = getServerConfig();
+  if (code !== config.EVENT_CODE || config.EVENT_START_MS === null || config.EVENT_END_MS === null) return null;
+  return { opensAt: config.EVENT_START_MS, closesAt: config.EVENT_END_MS };
+}
+
 function dayFileKey(code: string) {
   return `${code}/day.json`;
 }
@@ -84,27 +68,28 @@ function dayFileKey(code: string) {
 export async function getDay(code: string, now = Date.now()): Promise<DayInfo | null> {
   if (!isDayCode(code)) return null;
   const config = getServerConfig();
-
-  const window = config.DAY_MODE === "calendar" ? calendarWindow(code) : null;
-  if (config.DAY_MODE === "calendar" && !window) return null;
-
-  const file = await readJson<DayFile>(dayFileKey(code));
-  const opensAt = window?.opensAt ?? Date.parse(file?.opens_at ?? "");
-  const scheduledClose = window?.closesAt ?? Date.parse(file?.closes_at ?? "");
-  if (Number.isNaN(opensAt) || Number.isNaN(scheduledClose)) return null;
+  const window = config.SESSION_MODE === "event" ? eventWindow(code) : calendarWindow(code);
+  if (!window) return null;
 
   // Closing a Day early through admin overrides the scheduled close.
+  const file = await readJson<DayFile>(dayFileKey(code));
   const closedEarly = file?.closed_at ? Date.parse(file.closed_at) : Number.NaN;
-  const closesAt = Number.isNaN(closedEarly) ? scheduledClose : Math.min(closedEarly, scheduledClose);
+  const closesAt = Number.isNaN(closedEarly) ? window.closesAt : Math.min(closedEarly, window.closesAt);
 
-  const status: DayStatus = now >= closesAt ? "closed" : now < opensAt ? "upcoming" : "open";
+  const status: DayStatus = now >= closesAt ? "closed" : now < window.opensAt ? "upcoming" : "open";
+  // Before an event starts, guests can already open the album and see when it starts.
+  const visibleUpcoming = config.SESSION_MODE === "event";
   return {
     code,
+    mode: config.SESSION_MODE,
     status,
-    opens_at: new Date(opensAt).toISOString(),
+    opens_at: new Date(window.opensAt).toISOString(),
     closes_at: new Date(closesAt).toISOString(),
     timezone: config.APP_TIMEZONE,
-    gallery_visible: status === "open" || (status === "closed" && config.GALLERY_AFTER_CLOSE === "readonly"),
+    gallery_visible:
+      status === "open" ||
+      (status === "upcoming" && visibleUpcoming) ||
+      (status === "closed" && config.GALLERY_AFTER_CLOSE === "readonly"),
   };
 }
 

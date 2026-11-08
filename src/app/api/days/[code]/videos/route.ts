@@ -11,7 +11,7 @@ export const POST = route<{ code: string }>(async (request, { code }) => {
   const poster = requireFile(form.get("poster"), config.ALLOWED_MIME_TYPES);
   await requireGuest(code, guestId);
 
-  const video_limit = config.MAX_VIDEOS_PER_GUEST_PER_DAY;
+  const video_limit = config.MAX_VIDEOS_PER_PERSON;
   const video_used = await countGuestVideos(code, guestId);
   if (video_used >= video_limit) {
     throw new HttpError(429, "You've reached today's video limit.", {
