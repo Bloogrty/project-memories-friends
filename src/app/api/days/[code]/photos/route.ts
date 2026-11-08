@@ -26,7 +26,18 @@ export const POST = route<{ code: string }>(async (request, { code }) => {
 
   try {
     const id = await savePhoto(code, guestId, await fileToBuffer(photo));
-    log.info("photo saved", { day: code, guest: guestId, bytes: photo.size, used: used + 1, limit });
+    // Sent by the browser for photos it compressed; only used here, in the log.
+    const original = Number(form.get("originalBytes"));
+    const hasOriginal = Number.isFinite(original) && original > 0;
+    log.info("photo saved", {
+      day: code,
+      guest: guestId,
+      bytes: photo.size,
+      original_bytes: hasOriginal ? original : undefined,
+      saved_pct: hasOriginal ? Math.round((1 - photo.size / original) * 100) : undefined,
+      used: used + 1,
+      limit,
+    });
     return json({ id, used: used + 1, limit }, 201);
   } catch (error) {
     if (error instanceof InvalidMediaError) {

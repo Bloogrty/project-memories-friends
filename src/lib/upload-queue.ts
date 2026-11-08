@@ -33,7 +33,7 @@ export interface UploadHandlers {
 }
 
 type Source = { file?: File; blob?: Blob; poster?: Blob };
-type Entry = QueuedUpload & Source & { guestId: string; attempts: number };
+type Entry = QueuedUpload & Source & { guestId: string; attempts: number; originalBytes?: number };
 
 const EMPTY: QueuedUpload[] = [];
 
@@ -135,6 +135,7 @@ export class UploadQueue {
   private async send(entry: Entry) {
     if (!entry.blob && entry.file) {
       try {
+        entry.originalBytes = entry.file.size;
         entry.blob = await compressImage(entry.file, this.options.image);
         entry.file = undefined;
         entry.previewUrl = URL.createObjectURL(entry.blob);
@@ -147,6 +148,9 @@ export class UploadQueue {
 
     const form = new FormData();
     form.append("guestId", entry.guestId);
+    // Only for the server log, to show what compression saved. In-app camera
+    // shots are taken straight at the reduced size, so they have no original.
+    if (entry.originalBytes) form.append("originalBytes", String(entry.originalBytes));
     if (entry.kind === "video") {
       form.append("video", entry.blob!, "video");
       form.append("poster", entry.poster!, "poster.jpg");
